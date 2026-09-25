@@ -103,9 +103,26 @@ public class Instruccion {
      * @return true si el argumento es un nombre de registro
      */
     public boolean esRegistro(int indice) {
+        if (indice < 0 || indice >= argumentos.size()) {
+            return false;
+        }
         String arg = argumentos.get(indice).toUpperCase();
         return arg.equals("AC") || arg.equals("AX") || arg.equals("BX")
                 || arg.equals("CX") || arg.equals("DX");
+    }
+    
+    /**
+     * Obtiene el codigo de interrupcion como entero decimal.
+     * Convierte "20H" -> 32, "10H" -> 16, "09H" -> 9, "21H" -> 33.
+     *
+     * @param indice posicion del argumento
+     * @return codigo de interrupcion en decimal
+     * @throws NumberFormatException si el argumento no tiene formato valido
+     */
+    public int getCodigoInterrupcion(int indice) {
+        String codigo = argumentos.get(indice).toUpperCase();
+        // Quita la 'H' final y parsea en base 16
+        return Integer.parseInt(codigo.substring(0, codigo.length() - 1), 16);
     }
 
     @Override
