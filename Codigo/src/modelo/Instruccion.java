@@ -1,38 +1,118 @@
 package modelo;
 
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+
 /**
  * Representa una instrucción ensamblador de la máquina virtual.
  *
- * Cada instrucción se compone de tres partes:
- *   - opcode:   operación a realizar (ej. "MOV", "ADD", "LOAD")
- *   - registro: registro sobre el que actúa (ej. "AX", "BX", "AC")
- *   - valor:    operando numérico (constante o dirección)
+ * A diferencia del diseño de Tarea 1 (opcode + registro + valor fijos),
+ * esta versión soporta el conjunto ampliado de instrucciones del
+ * Proyecto 1, cuyo número y tipo de operandos varía según el opcode:
  *
- * Ejemplo: new Instruccion("MOV", "AX", 5)  ->  AX = 5
+ *   - Sin argumentos:        INC, DEC
+ *   - Un argumento:          LOAD AX, STORE BX, INC AX, DEC AX, PUSH AX, POP AX
+ *   - Dos argumentos:        MOV BX,AX / MOV BX,5 / SWAP AX,BX / CMP Reg1,Reg2
+ *   - Un desplazamiento:     JMP +3 / JMP -2 / JE +5 / JNE -1
+ *   - Codigo de interrupcion: INT 20H / INT 10H / INT 09H / INT 21H
+ *   - Hasta 3 parametros:    PARAM v1, v2, v3
  *
+ * En lugar de campos fijos, los operandos se guardan como una lista
+ * de argumentos en texto; cada opcode sabe cuantos argumentos espera
+ * y como interpretarlos (esa interpretacion ocurre en EjecutorCPU,
+ * no aqui).
+ *
+ * Esta clase solo GUARDA la instruccion ya separada; no valida ni
+ * ejecuta nada (esas responsabilidades son de Ensamblador y
+ * EjecutorCPU, respectivamente).
  */
 public class Instruccion {
 
-    private String opcode;    // operación a ejecutar
-    private String registro;  // registro destino o fuente
-    private int valor;        // operando numérico
+    private String opcode;              // operacion a ejecutar (ej. "MOV", "SWAP", "JMP")
+    private List<String> argumentos;    // operandos en texto, en el orden en que aparecen
 
     /**
-     * Crea una instrucción con sus tres componentes.
+     * Crea una instruccion con su opcode y una lista de argumentos.
      *
-     * @param opcode
-     * @param registro
-     * @param valor
+     * @param opcode     nombre de la operacion (ej. "MOV", "ADD", "SWAP")
+     * @param argumentos operandos en el orden en que aparecen en el codigo
+     *                   fuente; puede ser una lista vacia si el opcode no
+     *                   necesita argumentos (ej. "INC" a secas)
      */
-    public Instruccion(String opcode, String registro, int valor) {
+    public Instruccion(String opcode, List<String> argumentos) {
         this.opcode = opcode;
-        this.registro = registro;
-        this.valor = valor;
+        this.argumentos = (argumentos != null) ? argumentos : new ArrayList<>();
     }
 
-    /* ==================== GETTERS ==================== */
+    /**
+     * Constructor de conveniencia para instrucciones sin argumentos.
+     *
+     * @param opcode nombre de la operacion (ej. "INC", "DEC")
+     */
+    public Instruccion(String opcode) {
+        this(opcode, new ArrayList<>());
+    }
 
-    public String getOpcode() { return opcode; }
-    public String getRegistro() { return registro; }
-    public int getValor() { return valor; }
+    /* ==================== GETTERS BASICOS ==================== */
+
+    public String getOpcode() {
+        return opcode;
+    }
+
+    /** @return la lista de argumentos, en orden, como vista de solo lectura. */
+    public List<String> getArgumentos() {
+        return Collections.unmodifiableList(argumentos);
+    }
+
+    /** @return la cantidad de argumentos que tiene esta instruccion. */
+    public int cantidadArgumentos() {
+        return argumentos.size();
+    }
+
+    /**
+     * Obtiene un argumento por posicion, como texto.
+     *
+     * @param indice posicion del argumento (0 = primero)
+     * @return el argumento en esa posicion
+     * @throws IndexOutOfBoundsException si el indice no existe
+     */
+    public String getArgumento(int indice) {
+        return argumentos.get(indice);
+    }
+
+    /**
+     * Obtiene un argumento por posicion, convertido a entero.
+     * Util para valores numericos (ej. MOV BX, 5) o desplazamientos
+     * con signo (ej. JMP +3, JMP -2).
+     *
+     * @param indice posicion del argumento (0 = primero)
+     * @return el argumento en esa posicion, convertido a int
+     * @throws IndexOutOfBoundsException si el indice no existe
+     * @throws NumberFormatException si el argumento no es un numero valido
+     */
+    public int getArgumentoComoEntero(int indice) {
+        return Integer.parseInt(argumentos.get(indice));
+    }
+
+    /**
+     * Indica si el argumento en la posicion dada es un nombre de registro
+     * conocido (AC, AX, BX, CX, DX) en lugar de un valor numerico.
+     *
+     * @param indice posicion del argumento a revisar
+     * @return true si el argumento es un nombre de registro
+     */
+    public boolean esRegistro(int indice) {
+        String arg = argumentos.get(indice).toUpperCase();
+        return arg.equals("AC") || arg.equals("AX") || arg.equals("BX")
+                || arg.equals("CX") || arg.equals("DX");
+    }
+
+    @Override
+    public String toString() {
+        if (argumentos.isEmpty()) {
+            return opcode;
+        }
+        return opcode + " " + String.join(", ", argumentos);
+    }
 }

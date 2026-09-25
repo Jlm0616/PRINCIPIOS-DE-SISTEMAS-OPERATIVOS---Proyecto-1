@@ -8,13 +8,15 @@ package modelo;
  *   - Zona usuario: posiciones [limiteKernelUsuario, tamanoMemoria)
  *
  * El límite kernel/usuario es fijo y se define al construir la memoria.
- * Cada posición almacena un valor de tipo String (instrucción o dato).
+ * Cada posición almacena un Object, ya que la memoria no distingue tipos:
+ * puede contener una Instruccion, un BCP (referenciado por su dirección),
+ * un dato numérico, o null si está vacía.
  */
 public class Memoria {
 
     private int tamanoMemoria;         // cantidad total de posiciones
     private int limiteKernelUsuario;   // primera posición de la zona usuario
-    private String[] arregloMemoria;   // contenido de cada posición
+    private Object[] arregloMemoria;   // contenido de cada posición
 
     /** Tamaño mínimo permitido para una memoria (en posiciones). */
     public static final int TAMANO_MINIMO = 128;
@@ -32,26 +34,26 @@ public class Memoria {
         }
         this.tamanoMemoria = tamanoMemoria;
         this.limiteKernelUsuario = limiteKernelUsuario;
-        this.arregloMemoria = new String[tamanoMemoria];
+        this.arregloMemoria = new Object[tamanoMemoria];
     }
 
     /**
      * Escribe un valor en una posición de memoria.
      *
      * @param posicionMemoria índice donde escribir
-     * @param valorMemoria    valor a almacenar (instrucción o dato)
+     * @param valor           valor a almacenar (Instruccion, BCP, u otro Object)
      */
-    public void escribir(int posicionMemoria, String valorMemoria) {
-        arregloMemoria[posicionMemoria] = valorMemoria;
+    public void escribir(int posicionMemoria, Object valor) {
+        arregloMemoria[posicionMemoria] = valor;
     }
 
     /**
      * Lee el valor almacenado en una posición de memoria.
      *
      * @param posicionMemoria índice a leer
-     * @return el valor almacenado en esa posición
+     * @return el valor almacenado en esa posición (requiere casting al tipo esperado)
      */
-    public String leer(int posicionMemoria) {
+    public Object leer(int posicionMemoria) {
         return arregloMemoria[posicionMemoria];
     }
 
@@ -86,7 +88,7 @@ public class Memoria {
         return limiteKernelUsuario;
     }
 
-    public String[] getArregloMemoria() {
+    public Object[] getArregloMemoria() {
         return arregloMemoria;
     }
 

@@ -1,191 +1,298 @@
 package modelo;
 
-import soporte.CodificadorBinario;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Stack;
 
 /**
  * Bloque de Control de Proceso (BCP).
  *
- * A diferencia de un diseño con atributos privados, esta clase NO
- * guarda ningún dato dentro de sí misma. Todos los valores del BCP
- * (ID, Estado, PC, AC, AX, BX, CX, DX) viven físicamente en posiciones
- * fijas de la zona de Kernel del arreglo de {@link Memoria}.
- *
- * Esto refleja el comportamiento real de un sistema operativo: el BCP
- * de un proceso es información que vive en RAM, para poder consultarla
- * o restaurarla aunque el proceso no esté actualmente en la CPU.
- *
- * Posiciones fijas usadas dentro de la zona de Kernel:
- *   0 = ID
- *   1 = Estado
- *   2 = PC
- *   3 = AC
- *   4 = AX
- *   5 = BX
- *   6 = CX
- *   7 = DX
- *
- * Todos los campos se guardan en BINARIO:
- *   - ID:     8 bits sin signo  (0 a 255)
- *   - Estado: 2 bits (00=NUEVO, 01=EJECUTANDO, 10=TERMINADO, 11=reservado)
- *   - PC:     16 bits sin signo (0 a 65535)
- *   - AC/AX/BX/CX/DX: 16 bits con signo (complemento a 2)
- *
- * (El IR no se guarda en el BCP: representa la instrucción en curso
- * en este preciso ciclo, no un dato necesario para reanudar el proceso).
+ * El BCP ya no se descompone en casillas
+ * binarias dentro de Memoria. Ahora es una clase Java normal con
+ * atributos privados; la Memoria guardará una REFERENCIA a este objeto
+ * en una posición específica, simulando su "dirección".
  */
 public class BCP {
 
-    /* ==================== POSICIONES FIJAS EN KERNEL ==================== */
+    /** Tamaño máximo de la pila de un proceso. */
+    public static final int TAMANO_MAXIMO_PILA = 5;
 
-    private static final int POS_ID     = 0;  // identificador del proceso
-    private static final int POS_ESTADO = 1;  // estado actual
-    private static final int POS_PC     = 2;  // contador de programa
-    private static final int POS_AC     = 3;  // acumulador
-    private static final int POS_AX     = 4;  // registro AX
-    private static final int POS_BX     = 5;  // registro BX
-    private static final int POS_CX     = 6;  // registro CX
-    private static final int POS_DX     = 7;  // registro DX
-    private static final int POS_FLAGS  = 8;   // ← NUEVO: bandera de overflow
+    // --- Identificación y estado ---
+    private int id;
+    private EstadoProceso estado;
 
-    /** Cantidad de posiciones de Kernel que este BCP necesita. */
-    public static final int POSICIONES_REQUERIDAS = 9;
+    // --- Registros de CPU ---
+    private int pc;
+    private int ac;
+    private int ax;
+    private int bx;
+    private int cx;
+    private int dx;
+    private int ir;
 
-    /* ==================== CÓDIGOS DE ESTADO (2 bits) ==================== */
+    // --- Pila del proceso ---
+    private Stack<Integer> pila;
 
-    private static final String ESTADO_NUEVO      = "00";
-    private static final String ESTADO_EJECUTANDO = "01";
-    private static final String ESTADO_TERMINADO  = "10";
+    // --- Planificación ---
+    private int prioridad;
+    private int base;
+    private int alcance;
 
-    /* ==================== REFERENCIA A MEMORIA ==================== */
+    // --- Tiempos ---
+    private LocalDateTime tiempoInicio;
+    private LocalDateTime tiempoFin;
 
-    private final Memoria memoria;   // memoria sobre la que vive este BCP
+    // --- Recursos ---
+    private List<String> archivosAbiertos;
 
-    /**
-     * Crea un BCP que opera sobre las primeras posiciones de la zona
-     * de Kernel de la Memoria dada, inicializándolas con los valores
-     * de arranque de un proceso nuevo.
-     *
-     * @param memoria memoria sobre la cual el BCP lee y escribe
-     * @param id      identificador del proceso
-     */
-    public BCP(Memoria memoria, int id) {
-        this.memoria = memoria;
-        memoria.escribir(POS_ID,     CodificadorBinario.aBinario(id, 8));
-        memoria.escribir(POS_ESTADO, ESTADO_NUEVO);
-        memoria.escribir(POS_PC,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_AC,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_AX,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_BX,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_CX,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_DX,     CodificadorBinario.aBinario(0, 16));
-        memoria.escribir(POS_FLAGS,  "0");   // ← NUEVO: sin overflow al inicio
+    // --- CPU donde se ejecuta (-1 = ninguna) ---
+    private int cpuAsignado;
+
+    // --- Enlace para lista enlazada de BCPs ---
+    private BCP siguienteBCP;
+
+    // --- Dirección simulada donde "vive" el BCP ---
+    private int direccion;
+
+    /* ==================== CONSTRUCTOR ==================== */
+
+    public BCP(int id, int prioridad, int base, int alcance) {
+        this.id = id;
+        this.prioridad = prioridad;
+        this.base = base;
+        this.alcance = alcance;
+
+        this.estado = EstadoProceso.NEW;
+
+        this.pc = 0;
+        this.ac = 0;
+        this.ax = 0;
+        this.bx = 0;
+        this.cx = 0;
+        this.dx = 0;
+        this.ir = 0;
+
+        this.pila = new Stack<>();
+
+        this.tiempoInicio = null;
+        this.tiempoFin = null;
+
+        this.archivosAbiertos = new ArrayList<>();
+        this.cpuAsignado = -1;
+        this.siguienteBCP = null;
+        this.direccion = -1;
     }
 
-    /* ==================== ESCRITURA ==================== */
+    /* ==================== PILA ==================== */
 
     /**
-     * Copia el estado actual de una CPU hacia las posiciones del BCP
-     * en Memoria. Debe llamarse después de cada instrucción ejecutada.
+     * Apila un valor verificando que no se desborde la pila.
      *
-     * @param cpu    CPU cuyos registros se van a copiar
-     * @param estado nuevo estado del proceso ("NUEVO", "EJECUTANDO", "TERMINADO")
+     * @param valor valor a apilar
+     * @throws IllegalStateException si la pila ya está llena
      */
-    public void actualizarDesdeCPU(CPU cpu, String estado) {
-        memoria.escribir(POS_ESTADO, codificarEstado(estado));
-        memoria.escribir(POS_PC,     CodificadorBinario.aBinario(cpu.getPC(), 16));
-        memoria.escribir(POS_AC,     CodificadorBinario.aBinario(cpu.getAC(), 16));
-        memoria.escribir(POS_AX,     CodificadorBinario.aBinario(cpu.getAX(), 16));
-        memoria.escribir(POS_BX,     CodificadorBinario.aBinario(cpu.getBX(), 16));
-        memoria.escribir(POS_CX,     CodificadorBinario.aBinario(cpu.getCX(), 16));
-        memoria.escribir(POS_DX,     CodificadorBinario.aBinario(cpu.getDX(), 16));
-        memoria.escribir(POS_FLAGS,  cpu.getOverflow() ? "1" : "0");   // ← NUEVO
+    public void apilar(int valor) {
+        if (pila.size() >= TAMANO_MAXIMO_PILA) {
+            throw new IllegalStateException(
+                "Desbordamiento de pila en el proceso " + id +
+                " (máximo " + TAMANO_MAXIMO_PILA + " elementos)");
+        }
+        pila.push(valor);
     }
 
     /**
-     * Cambia solo el estado del proceso, sin tocar los demás valores.
+     * Desapila el tope de la pila.
      *
-     * @param estado nuevo estado ("NUEVO", "EJECUTANDO", "TERMINADO")
+     * @return el valor desapilado
+     * @throws IllegalStateException si la pila está vacía
      */
-    public void setEstado(String estado) {
-        memoria.escribir(POS_ESTADO, codificarEstado(estado));
+    public int desapilar() {
+        if (pila.isEmpty()) {
+            throw new IllegalStateException(
+                "Subdesbordamiento de pila en el proceso " + id + " (pila vacía)");
+        }
+        return pila.pop();
+    }
+
+    /* ==================== TIEMPOS ==================== */
+
+    /** Marca el inicio de ejecución (idempotente). */
+    public void marcarInicio() {
+        if (this.tiempoInicio == null) {
+            this.tiempoInicio = LocalDateTime.now();
+        }
+    }
+
+    /** Marca el fin de ejecución. */
+    public void marcarFin() {
+        this.tiempoFin = LocalDateTime.now();
+    }
+
+    /**
+     * @return duración en segundos, o -1 si aún no terminó.
+     */
+    public long getDuracionSegundos() {
+        if (tiempoInicio == null || tiempoFin == null) {
+            return -1;
+        }
+        return Duration.between(tiempoInicio, tiempoFin).getSeconds();
     }
 
     /* ==================== GETTERS ==================== */
 
-    /** @return el identificador del proceso. */
     public int getId() {
-        return CodificadorBinario.desdeBinario(memoria.leer(POS_ID));
+        return id;
     }
 
-    /** @return el estado actual del proceso como texto ("NUEVO", ...). */
-    public String getEstado() {
-        return decodificarEstado(memoria.leer(POS_ESTADO));
+    public EstadoProceso getEstado() {
+        return estado;
     }
 
-    /** @return el contador de programa guardado en el BCP. */
     public int getPc() {
-        return CodificadorBinario.desdeBinario(memoria.leer(POS_PC));
+        return pc;
     }
 
-    /** @return el acumulador guardado en el BCP (con signo). */
     public int getAc() {
-        return CodificadorBinario.desdeBinarioConSigno(memoria.leer(POS_AC));
+        return ac;
     }
 
-    /** @return el registro AX guardado en el BCP (con signo). */
     public int getAx() {
-        return CodificadorBinario.desdeBinarioConSigno(memoria.leer(POS_AX));
+        return ax;
     }
 
-    /** @return el registro BX guardado en el BCP (con signo). */
     public int getBx() {
-        return CodificadorBinario.desdeBinarioConSigno(memoria.leer(POS_BX));
+        return bx;
     }
 
-    /** @return el registro CX guardado en el BCP (con signo). */
     public int getCx() {
-        return CodificadorBinario.desdeBinarioConSigno(memoria.leer(POS_CX));
+        return cx;
     }
 
-    /** @return el registro DX guardado en el BCP (con signo). */
     public int getDx() {
-        return CodificadorBinario.desdeBinarioConSigno(memoria.leer(POS_DX));
+        return dx;
     }
 
-    /** @return true si la bandera de overflow está activa. */
-    public boolean getOverflow() {
-        return "1".equals(memoria.leer(POS_FLAGS));
+    public int getIr() {
+        return ir;
     }
 
-    /* ==================== MÉTODOS AUXILIARES DE ESTADO ==================== */
-
-    /**
-     * Mapea el texto de estado a su código binario de 2 bits.
-     *
-     * @param estado "NUEVO", "EJECUTANDO" o "TERMINADO"
-     * @return código binario de 2 bits
-     */
-    private String codificarEstado(String estado) {
-        switch (estado) {
-            case "NUEVO":      return ESTADO_NUEVO;
-            case "EJECUTANDO": return ESTADO_EJECUTANDO;
-            case "TERMINADO":  return ESTADO_TERMINADO;
-            default:           return ESTADO_NUEVO;
-        }
+    public Stack<Integer> getPila() {
+        return pila;
     }
 
-    /**
-     * Decodifica un código binario de 2 bits a su texto de estado.
-     *
-     * @param codigo "00", "01", "10" o "11"
-     * @return texto del estado
-     */
-    private String decodificarEstado(String codigo) {
-        switch (codigo) {
-            case ESTADO_NUEVO:      return "NUEVO";
-            case ESTADO_EJECUTANDO: return "EJECUTANDO";
-            case ESTADO_TERMINADO:  return "TERMINADO";
-            default:                return "DESCONOCIDO";
-        }
+    public int getPrioridad() {
+        return prioridad;
+    }
+
+    public int getBase() {
+        return base;
+    }
+
+    public int getAlcance() {
+        return alcance;
+    }
+
+    public LocalDateTime getTiempoInicio() {
+        return tiempoInicio;
+    }
+
+    public LocalDateTime getTiempoFin() {
+        return tiempoFin;
+    }
+
+    public List<String> getArchivosAbiertos() {
+        return archivosAbiertos;
+    }
+
+    public int getCpuAsignado() {
+        return cpuAsignado;
+    }
+
+    public BCP getSiguienteBCP() {
+        return siguienteBCP;
+    }
+
+    public int getDireccion() {
+        return direccion;
+    }
+
+    /* ==================== SETTERS ==================== */
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    public void setEstado(EstadoProceso estado) {
+        this.estado = estado;
+    }
+
+    public void setPc(int pc) {
+        this.pc = pc;
+    }
+
+    public void setAc(int ac) {
+        this.ac = ac;
+    }
+
+    public void setAx(int ax) {
+        this.ax = ax;
+    }
+
+    public void setBx(int bx) {
+        this.bx = bx;
+    }
+
+    public void setCx(int cx) {
+        this.cx = cx;
+    }
+
+    public void setDx(int dx) {
+        this.dx = dx;
+    }
+
+    public void setIr(int ir) {
+        this.ir = ir;
+    }
+
+    public void setPila(Stack<Integer> pila) {
+        this.pila = pila;
+    }
+
+    public void setPrioridad(int prioridad) {
+        this.prioridad = prioridad;
+    }
+
+    public void setBase(int base) {
+        this.base = base;
+    }
+
+    public void setAlcance(int alcance) {
+        this.alcance = alcance;
+    }
+
+    public void setTiempoInicio(LocalDateTime tiempoInicio) {
+        this.tiempoInicio = tiempoInicio;
+    }
+
+    public void setTiempoFin(LocalDateTime tiempoFin) {
+        this.tiempoFin = tiempoFin;
+    }
+
+    public void setArchivosAbiertos(List<String> archivosAbiertos) {
+        this.archivosAbiertos = archivosAbiertos;
+    }
+
+    public void setCpuAsignado(int cpuAsignado) {
+        this.cpuAsignado = cpuAsignado;
+    }
+
+    public void setSiguienteBCP(BCP siguienteBCP) {
+        this.siguienteBCP = siguienteBCP;
+    }
+
+    public void setDireccion(int direccion) {
+        this.direccion = direccion;
     }
 }
