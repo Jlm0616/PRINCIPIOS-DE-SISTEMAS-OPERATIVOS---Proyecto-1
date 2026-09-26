@@ -1,113 +1,323 @@
 package logica;
 
-import modelo.CPU;
-import modelo.Memoria;
 import modelo.BCP;
+import modelo.CPU;
+import modelo.EstadoProceso;
+import modelo.Instruccion;
+import modelo.Memoria;
 
 /**
- * Ejecutor del ciclo de instrucción de la CPU (fetch-decode-execute).
+ * Ejecutor del ciclo de instrucción (fetch-decode-execute) para el Proyecto 1.
  *
- * Se encarga de:
- *   1. Leer UNA posición de memoria a partir del PC (16 bits).
- *   2. Decodificar el primer byte en opcode + registro (4 bits cada uno).
- *   3. Decodificar el segundo byte como valor numérico.
- *   4. Ejecutar la operación sobre los registros de la CPU.
- *   5. Avanzar el PC en 1 posición.
- *   6. Sincronizar el estado de la CPU con el BCP (que vive en la RAM).
+ * A diferencia de la Tarea 1:
+ *   - Las instrucciones se leen como objetos Instruccion desde Memoria.
+ *   - Ya no hay Traductor: la codificación binaria desaparece.
+ *   - El BCP es un objeto persistente que refleja el estado del proceso.
+ *   - Se soporta el conjunto ampliado de instrucciones (~16).
+ *   - Se manejan interrupciones (INT 20H, 10H, 09H, 21H).
  *
- * Formato de la instrucción completa (16 bits):
- *   [ opcode (4) | registro (4) | signo (1) | magnitud (7) ]
- *     bits 0-3     bits 4-7      bit 8      bits 9-15
- *
- * El segundo byte contiene el operando (valor o dirección) en binario.
+ * Ciclo de ejecución de UNA instrucción:
+ *   1. Fetch:  leer la instrucción en la posición del PC.
+ *   2. Decode: identificar el opcode y sus argumentos (ya vienen parseados).
+ *   3. Execute: ejecutar la operación correspondiente.
+ *   4. Update:  avanzar el PC (salvo saltos) y sincronizar CPU -> BCP.
  */
 public class EjecutorCPU {
 
-    private CPU cpu;              // CPU sobre la que se ejecutan las instrucciones
-    private Memoria memoria;      // memoria de donde se leen las instrucciones
-    private BCP bcp;              // BCP del proceso en ejecución (vive en la RAM)
-    private Traductor traductor;  // decodifica bytes a opcode/registro/valor
+    private CPU cpu;
+    private Memoria memoria;
+    private BCP bcp;
+
+    /** Indica si el programa ya terminó (INT 20H o EXIT). */
+    private boolean programaTerminado;
 
     /**
-     * Crea un ejecutor asociado a una CPU y una memoria.
+     * Crea un ejecutor asociado a una CPU, una memoria y un BCP.
      *
-     * Inicializa un BCP con id 1, cuyas posiciones viven en la zona
-     * de Kernel de la memoria recibida. También crea un Traductor
-     * por defecto.
-     *
-     * @param cpu     CPU sobre la que se ejecutará
+     * @param cpu     CPU sobre la que se ejecutarán las instrucciones
      * @param memoria memoria desde la que se leerán las instrucciones
-     *                y donde vivirá el BCP del proceso
+     * @param bcp     BCP del proceso en ejecución
      */
-    public EjecutorCPU(CPU cpu, Memoria memoria) {
+    public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp) {
         this.cpu = cpu;
         this.memoria = memoria;
-        this.bcp = new BCP(memoria, 1);
-        this.traductor = new Traductor();
+        this.bcp = bcp;
+        this.programaTerminado = false;
     }
 
+    /* ==================== CICLO PRINCIPAL ==================== */
+
     /**
-     * Ejecuta una instrucción completa (fetch-decode-execute).
+     * Ejecuta UNA instrucción del programa del BCP actual (fetch-decode-execute).
      *
-     * Pasos:
-     *   1. Lee UNA posición de memoria a partir del PC (16 bits).
-     *   2. La guarda en el IR.
-     *   3. Del primer byte extrae opcode (bits 0-3) y registro (bits 4-7).
-     *   4. Del segundo byte extrae el valor numérico.
-     *   5. Ejecuta la operación correspondiente.
-     *   6. Avanza el PC en 1 posición.
-     *   7. Copia el estado de la CPU al BCP (en RAM) y lo marca
-     *      como "EJECUTANDO".
+     * @throws IllegalStateException si el programa ya terminó o no hay instrucción
      */
     public void ejecutarInstruccion() {
+        if (programaTerminado) {
+            throw new IllegalStateException(
+                "El programa del proceso " + bcp.getId() + " ya terminó.");
+        }
+
         int pc = cpu.getPC();
+        Instruccion instr = memoria.leerInstruccion(pc);
 
-        // 1. Leer UNA posición: la instrucción completa (16 bits)
-        String instruccionCompleta = memoria.leer(pc);
+        if (instr == null) {
+            throw new IllegalStateException(
+                "No hay instrucción en la posición " + pc
+                + " (proceso " + bcp.getId() + ")");
+        }
 
-        // 2. Guardar la instrucción completa en IR
-        cpu.setIR(Integer.parseInt(instruccionCompleta, 2));
+        // Guardar en IR el PC de la instrucción actual (informativo)
+        cpu.setIR(pc);
 
-        // 3. Separar en dos bytes (opcode+registro | valor)
-        String primerByte  = instruccionCompleta.substring(0, 8);
-        String segundoByte = instruccionCompleta.substring(8, 16);
+        // Ejecutar. Devuelve true si la instrucción modificó el PC (salto).
+        boolean saltoEjecutado;
+        try {
+            saltoEjecutado = ejecutarOperacion(instr, pc);
+        } catch (IllegalStateException e) {
+            // Desbordamiento o subdesbordamiento de pila
+            // (Tabla 3.2 del Stallings: "Bounds violation")
+            bcp.setEstado(EstadoProceso.EXIT);
+            bcp.marcarFin();
+            programaTerminado = true;
+            bcp.actualizarDesdeCPU(cpu);
+            System.out.println("[ERROR FATAL] Proceso " + bcp.getId()
+                    + " terminado: " + e.getMessage());
+            return;   // el proceso queda en EXIT, no se propaga la excepción
+        }
 
-        // 4. Decodificación: opcode (4 bits) + registro (4 bits)
-        String codigoOpcode   = primerByte.substring(0, 4);
-        String codigoRegistro = primerByte.substring(4, 8);
-        int valor = traductor.decodificarValor(segundoByte);
+        // Avanzar el PC salvo que la instrucción haya sido un salto
+        if (!saltoEjecutado) {
+            cpu.setPC(pc + 1);
+        }
 
-        String opcode   = traductor.decodificarOpcode(codigoOpcode);
-        String registro = traductor.decodificarRegistro(codigoRegistro);
-
-        // 5. Ejecutar la operación
-        ejecutarOperacion(opcode, registro, valor);
-
-        // 6. Avanzar el PC en 1 posición
-        cpu.setPC(pc + 1);
-
-        /* -------- Sincronización con el BCP (en RAM) -------- */
-        bcp.actualizarDesdeCPU(cpu, "EJECUTANDO");
+        // Sincronizar CPU -> BCP
+        bcp.actualizarDesdeCPU(cpu);
     }
 
     /**
-     * Ejecuta una secuencia de instrucciones consecutivas.
+     * Ejecuta el programa completo hasta que termine (INT 20H, EXIT, o error fatal).
+     * Pensado para el modo "Automático" de la GUI.
      *
-     * Al terminar, marca el BCP como "TERMINADO".
-     *
-     * @param cantidadInstrucciones número de instrucciones a ejecutar
+     * @return cantidad de instrucciones ejecutadas
      */
-    public void ejecutarPrograma(int cantidadInstrucciones) {
-        for (int i = 0; i < cantidadInstrucciones; i++) {
+    public int ejecutarHastaTerminar() {
+        int contador = 0;
+        while (!programaTerminado) {
             ejecutarInstruccion();
+            contador++;
         }
-
-        bcp.setEstado("TERMINADO");
+        return contador;
     }
-    
+
+    /* ==================== EJECUCIÓN POR OPCODE ==================== */
+
+    /**
+     * Ejecuta la operación correspondiente al opcode de la instrucción.
+     *
+     * @param instr instrucción a ejecutar
+     * @param pc    PC actual (dirección de la instrucción en ejecución)
+     * @return true si la instrucción modificó el PC (salto tomado), false si no
+     */
+    private boolean ejecutarOperacion(Instruccion instr, int pc) {
+        String opcode = instr.getOpcode();
+
+        switch (opcode) {
+            case "LOAD":
+                cpu.setAC(leerRegistro(instr.getArgumento(0)));
+                return false;
+
+            case "STORE":
+                escribirRegistro(instr.getArgumento(0), cpu.getAC());
+                return false;
+
+            case "MOV":
+                ejecutarMOV(instr);
+                return false;
+
+            case "ADD":
+                int suma = cpu.getAC() + leerRegistro(instr.getArgumento(0));
+                if (suma > 32767 || suma < -32768) {
+                    cpu.setOverflow(true);
+                }
+                cpu.setAC(limitarA16Bits(suma));
+                return false;
+
+            case "SUB":
+                int resta = cpu.getAC() - leerRegistro(instr.getArgumento(0));
+                if (resta > 32767 || resta < -32768) {
+                    cpu.setOverflow(true);
+                }
+                cpu.setAC(limitarA16Bits(resta));
+                return false;
+
+            case "INC":
+                ejecutarINC(instr);
+                return false;
+
+            case "DEC":
+                ejecutarDEC(instr);
+                return false;
+
+            case "SWAP":
+                ejecutarSWAP(instr);
+                return false;
+
+            case "CMP":
+                ejecutarCMP(instr);
+                return false;
+
+            case "JMP":
+                cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+                return true;
+
+            case "JE":
+                if (cpu.getBanderaIgual()) {
+                    cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+                    return true;
+                }
+                return false;
+
+            case "JNE":
+                if (!cpu.getBanderaIgual()) {
+                    cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+                    return true;
+                }
+                return false;
+
+            case "PUSH":
+                bcp.apilar(leerRegistro(instr.getArgumento(0)));
+                return false;
+
+            case "POP":
+                escribirRegistro(instr.getArgumento(0), bcp.desapilar());
+                return false;
+
+            case "PARAM":
+                for (int i = 0; i < instr.cantidadArgumentos(); i++) {
+                    bcp.apilar(instr.getArgumentoComoEntero(i));
+                }
+                return false;
+
+            case "INT":
+                ejecutarINT(instr.getCodigoInterrupcion(0));
+                return false;
+
+            default:
+                throw new UnsupportedOperationException(
+                    "Opcode no soportado: " + opcode);
+        }
+    }
+
+    /* ==================== HELPERS POR INSTRUCCIÓN ==================== */
+
+    /**
+     * Ejecuta MOV. Soporta:
+     *   MOV reg_destino, reg_origen
+     *   MOV reg_destino, valor
+     */
+    private void ejecutarMOV(Instruccion instr) {
+        String destino = instr.getArgumento(0);
+
+        if (instr.cantidadArgumentos() >= 2 && instr.esRegistro(1)) {
+            // MOV reg, reg
+            escribirRegistro(destino, leerRegistro(instr.getArgumento(1)));
+        } else {
+            // MOV reg, valor
+            escribirRegistro(destino, instr.getArgumentoComoEntero(1));
+        }
+    }
+
+    /**
+     * Ejecuta INC. Soporta:
+     *   INC        -> AC = AC + 1
+     *   INC reg    -> reg = reg + 1
+     */
+    private void ejecutarINC(Instruccion instr) {
+        if (instr.cantidadArgumentos() == 0) {
+            cpu.setAC(limitarA16Bits(cpu.getAC() + 1));
+        } else {
+            String reg = instr.getArgumento(0);
+            escribirRegistro(reg, leerRegistro(reg) + 1);
+        }
+    }
+
+    /**
+     * Ejecuta DEC. Soporta:
+     *   DEC        -> AC = AC - 1
+     *   DEC reg    -> reg = reg - 1
+     */
+    private void ejecutarDEC(Instruccion instr) {
+        if (instr.cantidadArgumentos() == 0) {
+            cpu.setAC(limitarA16Bits(cpu.getAC() - 1));
+        } else {
+            String reg = instr.getArgumento(0);
+            escribirRegistro(reg, leerRegistro(reg) - 1);
+        }
+    }
+
+    /**
+     * Ejecuta SWAP reg1, reg2 (intercambia los valores).
+     */
+    private void ejecutarSWAP(Instruccion instr) {
+        String r1 = instr.getArgumento(0);
+        String r2 = instr.getArgumento(1);
+        int v1 = leerRegistro(r1);
+        int v2 = leerRegistro(r2);
+        escribirRegistro(r1, v2);
+        escribirRegistro(r2, v1);
+    }
+
+    /**
+     * Ejecuta CMP reg1, reg2. Deja el resultado en la banderaIgual de la CPU.
+     */
+    private void ejecutarCMP(Instruccion instr) {
+        int v1 = leerRegistro(instr.getArgumento(0));
+        int v2 = leerRegistro(instr.getArgumento(1));
+        cpu.setBanderaIgual(v1 == v2);
+    }
+
+    /**
+     * Ejecuta una interrupción.
+     *
+     * @param codigo código decimal de la interrupción (ej. 0x20 = 32)
+     */
+    private void ejecutarINT(int codigo) {
+        switch (codigo) {
+            case 0x20:  // 20H -> fin del programa
+                bcp.setEstado(EstadoProceso.EXIT);
+                bcp.marcarFin();
+                programaTerminado = true;
+                break;
+
+            case 0x10:  // 10H -> imprimir DX en pantalla
+                System.out.println("[PANTALLA] DX = " + cpu.getDX());
+                break;
+
+            case 0x09:  // 09H -> leer teclado (numérico 0-255)
+                // TODO: conectar con la consola de teclado de la GUI
+                System.out.println("[TECLADO] pendiente de implementación");
+                break;
+
+            case 0x21:  // 21H -> manejo de archivos
+                // TODO: conectar con el almacenamiento secundario
+                System.out.println("[ARCHIVOS] pendiente de implementación");
+                break;
+
+            default:
+                throw new UnsupportedOperationException(
+                    "Interrupción no soportada: " + Integer.toHexString(codigo) + "H");
+        }
+    }
+
+    /* ==================== HELPERS GENERALES ==================== */
+
     /**
      * Trunca un valor a 16 bits con signo (complemento a 2).
      * Simula el comportamiento de un registro real de 16 bits.
+     *
+     * @param valor valor a truncar
+     * @return valor truncado a 16 bits con signo
      */
     private int limitarA16Bits(int valor) {
         int v = valor & 0xFFFF;
@@ -115,85 +325,53 @@ public class EjecutorCPU {
     }
 
     /**
-     * Ejecuta la operación indicada por el opcode sobre el registro y valor dados.
+     * Lee el valor de un registro de la CPU.
      *
-     * Operaciones soportadas:
-     *   MOV   -> registro = valor
-     *   LOAD  -> AC = registro
-     *   STORE -> registro = AC
-     *   ADD   -> AC = AC + registro
-     *   SUB   -> AC = AC - registro
-     *
-     * Si el opcode no coincide con ninguna operación, no hace nada.
-     *
-     * @param opcode   nombre de la operación
-     * @param registro registro sobre el que actúa
-     * @param valor    operando numérico (usado solo por MOV)
+     * @param nombre nombre del registro ("AC", "AX", "BX", "CX", "DX")
+     * @return el valor del registro
+     * @throws IllegalArgumentException si el nombre no es válido
      */
-    private void ejecutarOperacion(String opcode, String registro, int valor) {
-        switch (opcode) {
-            case "MOV":
-                escribirRegistro(registro, valor);
-                break;   // NO resetear overflow (sticky)
-            case "LOAD":
-                cpu.setAC(leerRegistro(registro));
-                break;   // NO resetear overflow (sticky)
-            case "STORE":
-                escribirRegistro(registro, cpu.getAC());
-                break;   // NO resetear overflow (sticky)
-            case "ADD":
-                int suma = cpu.getAC() + leerRegistro(registro);
-                if (suma > 32767 || suma < -32768) {
-                    cpu.setOverflow(true);   // solo activa, nunca resetea
-                }
-                cpu.setAC(limitarA16Bits(suma));
-                break;
-            case "SUB":
-                int resta = cpu.getAC() - leerRegistro(registro);
-                if (resta > 32767 || resta < -32768) {
-                    cpu.setOverflow(true);
-                }
-                cpu.setAC(limitarA16Bits(resta));
-                break;
-        }
-    }
-
-    /**
-     * Lee el valor de un registro de propósito general de la CPU.
-     *
-     * @param registro nombre del registro ("AX", "BX", "CX", "DX")
-     * @return el valor del registro, o 0 si el nombre no coincide
-     */
-    private int leerRegistro(String registro) {
-        switch (registro) {
+    private int leerRegistro(String nombre) {
+        switch (nombre) {
+            case "AC": return cpu.getAC();
             case "AX": return cpu.getAX();
             case "BX": return cpu.getBX();
             case "CX": return cpu.getCX();
             case "DX": return cpu.getDX();
+            default:
+                throw new IllegalArgumentException("Registro desconocido: " + nombre);
         }
-        return 0;
     }
 
     /**
-     * Escribe un valor en un registro de propósito general de la CPU.
+     * Escribe un valor en un registro de la CPU.
      *
-     * Si el nombre del registro no coincide con ninguno válido, no hace nada.
-     *
-     * @param registro nombre del registro ("AX", "BX", "CX", "DX")
-     * @param valor    valor a escribir
+     * @param nombre nombre del registro ("AC", "AX", "BX", "CX", "DX")
+     * @param valor  valor a escribir (se trunca a 16 bits)
+     * @throws IllegalArgumentException si el nombre no es válido
      */
-    private void escribirRegistro(String registro, int valor) {
+    private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
-        switch (registro) {
+        switch (nombre) {
+            case "AC": cpu.setAC(valorLimitado); break;
             case "AX": cpu.setAX(valorLimitado); break;
             case "BX": cpu.setBX(valorLimitado); break;
             case "CX": cpu.setCX(valorLimitado); break;
             case "DX": cpu.setDX(valorLimitado); break;
+            default:
+                throw new IllegalArgumentException("Registro desconocido: " + nombre);
         }
     }
+
+    /* ==================== GETTERS ==================== */
 
     /** @return el BCP asociado a este ejecutor. */
     public BCP getBcp() {
         return bcp;
+    }
+
+    /** @return true si el programa ya terminó. */
+    public boolean isProgramaTerminado() {
+        return programaTerminado;
     }
 }

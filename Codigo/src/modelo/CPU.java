@@ -7,6 +7,10 @@ package modelo;
  * PC (contador de programa), IR (registro de instrucción) y los registros
  * de propósito general AC, AX, BX, CX y DX.
  *
+ * También incluye dos banderas internas de hardware:
+ *   - overflow:      true si la última operación aritmética desbordó el rango.
+ *   - banderaIgual:  resultado de la última instrucción CMP, usado por JE/JNE.
+ *
  * Los registros AX, BX, CX y DX se usan como operandos en las instrucciones,
  * mientras que AC (acumulador) suele almacenar el resultado de operaciones.
  */
@@ -19,7 +23,9 @@ public class CPU {
     private int BX;   // registro de propósito general
     private int CX;   // registro de propósito general
     private int DX;   // registro de propósito general
-    private boolean overflow;   // bandera de overflow: true si la última operación desbordó
+
+    private boolean overflow;      // true si la última operación aritmética desbordó
+    private boolean banderaIgual;  // resultado de la última comparación (CMP)
 
     /**
      * Crea una CPU con todos los registros inicializados en 0,
@@ -36,27 +42,82 @@ public class CPU {
         this.CX = 0;
         this.DX = 0;
         this.overflow = false;
+        this.banderaIgual = false;
     }
 
     /* ==================== GETTERS ==================== */
 
-    public int getPC() { return PC; }
-    public int getIR() { return IR; }
-    public int getAC() { return AC; }
-    public int getAX() { return AX; }
-    public int getBX() { return BX; }
-    public int getCX() { return CX; }
-    public int getDX() { return DX; }
-    public boolean getOverflow() { return overflow; }
+    public int getPC() {
+        return PC;
+    }
+
+    public int getIR() {
+        return IR;
+    }
+
+    public int getAC() {
+        return AC;
+    }
+
+    public int getAX() {
+        return AX;
+    }
+
+    public int getBX() {
+        return BX;
+    }
+
+    public int getCX() {
+        return CX;
+    }
+
+    public int getDX() {
+        return DX;
+    }
+
+    public boolean getOverflow() {
+        return overflow;
+    }
+
+    public boolean getBanderaIgual() {
+        return banderaIgual;
+    }
 
     /* ==================== SETTERS ==================== */
 
-    public void setPC(int PC) { this.PC = PC; }
-    public void setIR(int IR) { this.IR = IR; }
-    public void setAC(int AC) { this.AC = AC; }
-    public void setAX(int AX) { this.AX = AX; }
-    public void setBX(int BX) { this.BX = BX; }
-    public void setCX(int CX) { this.CX = CX; }
-    public void setDX(int DX) { this.DX = DX; }
-    public void setOverflow(boolean overflow) { this.overflow = overflow; }
+    public void setPC(int PC) {
+        this.PC = PC;
+    }
+
+    public void setIR(int IR) {
+        this.IR = IR;
+    }
+
+    public void setAC(int AC) {
+        this.AC = AC;
+    }
+
+    public void setAX(int AX) {
+        this.AX = AX;
+    }
+
+    public void setBX(int BX) {
+        this.BX = BX;
+    }
+
+    public void setCX(int CX) {
+        this.CX = CX;
+    }
+
+    public void setDX(int DX) {
+        this.DX = DX;
+    }
+
+    public void setOverflow(boolean overflow) {
+        this.overflow = overflow;
+    }
+
+    public void setBanderaIgual(boolean banderaIgual) {
+        this.banderaIgual = banderaIgual;
+    }
 }

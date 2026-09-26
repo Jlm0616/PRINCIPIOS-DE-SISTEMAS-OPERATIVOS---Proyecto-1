@@ -9,10 +9,23 @@ import java.util.Stack;
 /**
  * Bloque de Control de Proceso (BCP).
  *
- * El BCP ya no se descompone en casillas
- * binarias dentro de Memoria. Ahora es una clase Java normal con
- * atributos privados; la Memoria guardará una REFERENCIA a este objeto
- * en una posición específica, simulando su "dirección".
+ * Es una clase Java normal con atributos privados; la Memoria guardará
+ * una REFERENCIA a este objeto en una posición específica, simulando
+ * su "dirección" dentro del espacio de direcciones.
+ *
+ * El BCP persiste TODO el estado del proceso, incluyendo:
+ *   - Registros: pc, ir, ac, ax, bx, cx, dx
+ *   - Banderas: overflow, banderaIgual (copia de la CPU)
+ *   - Pila (máx. 5 elementos, con detección de desbordamiento)
+ *   - Planificación: prioridad, base, alcance
+ *   - Tiempos: inicio, fin
+ *   - Recursos: archivos abiertos
+ *   - Enlace al siguiente BCP (lista enlazada)
+ *   - Dirección simulada donde vive este BCP
+ *
+ * La sincronización con la CPU se hace con:
+ *   - actualizarDesdeCPU(CPU): copia CPU -> BCP (tras cada instrucción)
+ *   - actualizarHaciaCPU(CPU): copia BCP -> CPU (al despachar un proceso)
  */
 public class BCP {
 
@@ -31,6 +44,10 @@ public class BCP {
     private int cx;
     private int dx;
     private int ir;
+
+    // --- Banderas (copia del estado de la CPU) ---
+    private boolean overflow;      // true si la última operación aritmética desbordó
+    private boolean banderaIgual;  // resultado de la última comparación (CMP)
 
     // --- Pila del proceso ---
     private Stack<Integer> pila;
@@ -58,6 +75,15 @@ public class BCP {
 
     /* ==================== CONSTRUCTOR ==================== */
 
+    /**
+     * Crea un BCP en estado NEW, con todos los registros y banderas en 0/false,
+     * pila vacía, sin archivos abiertos y sin CPU asignada.
+     *
+     * @param id        identificador del proceso
+     * @param prioridad prioridad del proceso
+     * @param base      dirección de inicio del proceso en memoria
+     * @param alcance   tamaño del proceso en posiciones
+     */
     public BCP(int id, int prioridad, int base, int alcance) {
         this.id = id;
         this.prioridad = prioridad;
@@ -74,6 +100,9 @@ public class BCP {
         this.dx = 0;
         this.ir = 0;
 
+        this.overflow = false;
+        this.banderaIgual = false;
+
         this.pila = new Stack<>();
 
         this.tiempoInicio = null;
@@ -83,6 +112,45 @@ public class BCP {
         this.cpuAsignado = -1;
         this.siguienteBCP = null;
         this.direccion = -1;
+    }
+
+    /* ==================== SINCRONIZACIÓN CON CPU ==================== */
+
+    /**
+     * Copia el estado actual de la CPU hacia este BCP.
+     * Se llama al final de cada instrucción ejecutada, para persistir
+     * el estado del proceso en memoria.
+     *
+     * @param cpu CPU desde la cual copiar
+     */
+    public void actualizarDesdeCPU(CPU cpu) {
+        this.pc = cpu.getPC();
+        this.ir = cpu.getIR();
+        this.ac = cpu.getAC();
+        this.ax = cpu.getAX();
+        this.bx = cpu.getBX();
+        this.cx = cpu.getCX();
+        this.dx = cpu.getDX();
+        this.overflow = cpu.getOverflow();
+        this.banderaIgual = cpu.getBanderaIgual();
+    }
+
+    /**
+     * Copia el estado de este BCP hacia la CPU.
+     * Se llama antes de reanudar un proceso (despacho).
+     *
+     * @param cpu CPU hacia la cual copiar
+     */
+    public void actualizarHaciaCPU(CPU cpu) {
+        cpu.setPC(this.pc);
+        cpu.setIR(this.ir);
+        cpu.setAC(this.ac);
+        cpu.setAX(this.ax);
+        cpu.setBX(this.bx);
+        cpu.setCX(this.cx);
+        cpu.setDX(this.dx);
+        cpu.setOverflow(this.overflow);
+        cpu.setBanderaIgual(this.banderaIgual);
     }
 
     /* ==================== PILA ==================== */
@@ -178,6 +246,14 @@ public class BCP {
         return ir;
     }
 
+    public boolean getOverflow() {
+        return overflow;
+    }
+
+    public boolean getBanderaIgual() {
+        return banderaIgual;
+    }
+
     public Stack<Integer> getPila() {
         return pila;
     }
@@ -254,6 +330,14 @@ public class BCP {
 
     public void setIr(int ir) {
         this.ir = ir;
+    }
+
+    public void setOverflow(boolean overflow) {
+        this.overflow = overflow;
+    }
+
+    public void setBanderaIgual(boolean banderaIgual) {
+        this.banderaIgual = banderaIgual;
     }
 
     public void setPila(Stack<Integer> pila) {
