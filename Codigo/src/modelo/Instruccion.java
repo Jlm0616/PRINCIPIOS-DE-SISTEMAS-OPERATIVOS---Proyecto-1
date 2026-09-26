@@ -124,6 +124,51 @@ public class Instruccion {
         // Quita la 'H' final y parsea en base 16
         return Integer.parseInt(codigo.substring(0, codigo.length() - 1), 16);
     }
+    
+    /**
+     * @return el peso (tiempo de CPU en segundos) de esta instrucción,
+     *         según la tabla del enunciado del Proyecto 1.
+     * @throws UnsupportedOperationException si el opcode no tiene peso definido
+     */
+    public int getPeso() {
+        switch (opcode) {
+            case "LOAD":  return 2;
+            case "STORE": return 2;
+            case "MOV":   return 1;
+            case "ADD":   return 3;
+            case "SUB":   return 3;
+            case "INC":   return 1;
+            case "DEC":   return 1;
+            case "SWAP":  return 1;
+            case "JMP":   return 2;
+            case "CMP":   return 2;
+            case "JE":    return 2;
+            case "JNE":   return 2;
+            case "PARAM": return 3;
+            case "PUSH":  return 1;
+            case "POP":   return 1;
+            case "INT":   return pesoDeINT();
+            default:
+                throw new UnsupportedOperationException(
+                    "Opcode sin peso definido: " + opcode);
+        }
+    }
+
+    /**
+     * @return el peso específico de la interrupción según su código.
+     */
+    private int pesoDeINT() {
+        int codigo = getCodigoInterrupcion(0);
+        switch (codigo) {
+            case 0x20: return 2;   // INT 20H -> fin del programa
+            case 0x10: return 2;   // INT 10H -> imprimir DX
+            case 0x09: return 3;   // INT 09H -> leer teclado
+            case 0x21: return 5;   // INT 21H -> manejo de archivos
+            default:
+                throw new UnsupportedOperationException(
+                    "INT sin peso definido: " + Integer.toHexString(codigo) + "H");
+        }
+    }
 
     @Override
     public String toString() {

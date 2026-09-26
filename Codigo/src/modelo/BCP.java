@@ -44,6 +44,9 @@ public class BCP {
     private int cx;
     private int dx;
     private int ir;
+    
+    // --- Estado de ejecución (peso) ---
+    private int pesoPendiente;
 
     // --- Banderas (copia del estado de la CPU) ---
     private boolean overflow;      // true si la última operación aritmética desbordó
@@ -92,7 +95,7 @@ public class BCP {
 
         this.estado = EstadoProceso.NEW;
 
-        this.pc = 0;
+        this.pc = base;
         this.ac = 0;
         this.ax = 0;
         this.bx = 0;
@@ -100,6 +103,8 @@ public class BCP {
         this.dx = 0;
         this.ir = 0;
 
+        this.pesoPendiente = 0; 
+        
         this.overflow = false;
         this.banderaIgual = false;
 
@@ -294,6 +299,10 @@ public class BCP {
         return direccion;
     }
 
+    public int getPesoPendiente() {
+        return pesoPendiente;
+    }
+    
     /* ==================== SETTERS ==================== */
 
     public void setId(int id) {
@@ -379,4 +388,9 @@ public class BCP {
     public void setDireccion(int direccion) {
         this.direccion = direccion;
     }
+    
+    public void setPesoPendiente(int pesoPendiente) {
+        this.pesoPendiente = pesoPendiente;
+    }
+
 }

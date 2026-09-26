@@ -2,265 +2,169 @@ package App;
 
 import modelo.BCP;
 import modelo.CPU;
-import modelo.Instruccion;
+import modelo.EstadoProceso;
 import modelo.Memoria;
-import logica.EjecutorCPU;
-import logica.Ensamblador;
+import logica.GestorProcesos;
+import logica.ListaDeTrabajos;
+import logica.ParticionadorFijo;
+import logica.ResultadoCarga;
 
 import java.io.File;
-import java.util.Arrays;
-import java.util.List;
 
 /**
- * Punto de entrada del simulador Mini PC + pruebas del núcleo del proyecto.
+ * Prueba end-to-end del gestor de procesos (Proyecto 1).
  *
- * Las pruebas están dentro del main para que puedas ejecutarlas
- * rápidamente desde NetBeans sin necesidad de tests formales.
- *
- * Cuando la GUI esté adaptada al nuevo BCP, se descomentará
- * el bloque de SwingUtilities.invokeLater(...) al final.
+ * Carga varios archivos .asm, ejecuta paso a paso mostrando el estado
+ * del sistema (proceso actual, cola, BCPs) y luego ejecuta todo
+ * automáticamente.
  */
 public class Main {
 
     public static void main(String[] args) {
-
-        probarInstruccion();
-        probarEnsamblador();
-        probarEjecutorCPU();
-        probarSaltos();
-        probarPila();
-
-        // ============ LANZAR LA GUI (descomentar cuando esté lista) ============
-        // SwingUtilities.invokeLater(() -> {
-        //     VentanaPrincipal ventana = new VentanaPrincipal();
-        //     ventana.setVisible(true);
-        // });
+        probarGestorProcesos();
     }
 
-    /* ==================== PRUEBAS DE Instruccion ==================== */
+    private static void probarGestorProcesos() {
+        System.out.println("========== PRUEBA DEL GESTOR DE PROCESOS ==========\n");
 
-    private static void probarInstruccion() {
-        System.out.println("========== PRUEBAS DE Instruccion ==========\n");
+        // --- 1. Configurar el sistema ---
+        int tamanoMemoria = 256;
+        int limiteKernel = 32;      // primeras 32 posiciones para kernel
+        int maxProcesos = 5;        // hasta 5 procesos según el enunciado
 
-        Instruccion inc = new Instruccion("INC");
-        System.out.println("Caso 1: " + inc);
-        System.out.println("  Cantidad argumentos: " + inc.cantidadArgumentos());
+        Memoria memoria = new Memoria(tamanoMemoria, limiteKernel);
+        CPU cpu = new CPU(limiteKernel);
+        ListaDeTrabajos listaDeTrabajos = new ListaDeTrabajos();
 
-        Instruccion load = new Instruccion("LOAD", Arrays.asList("AX"));
-        System.out.println("Caso 2: " + load);
-        System.out.println("  Argumento 0: " + load.getArgumento(0));
-        System.out.println("  Es registro?: " + load.esRegistro(0));
+        int espacioUsuario = memoria.getEspacioUsuarioDisponible();
+        ParticionadorFijo particionador = new ParticionadorFijo(
+                limiteKernel, espacioUsuario, maxProcesos);
 
-        Instruccion movRegReg = new Instruccion("MOV", Arrays.asList("BX", "AX"));
-        System.out.println("Caso 3: " + movRegReg);
-        System.out.println("  Arg0 es registro?: " + movRegReg.esRegistro(0));
-        System.out.println("  Arg1 es registro?: " + movRegReg.esRegistro(1));
+        GestorProcesos gestor = new GestorProcesos(
+                memoria, cpu, listaDeTrabajos, particionador);
 
-        Instruccion movRegVal = new Instruccion("MOV", Arrays.asList("BX", "5"));
-        System.out.println("Caso 4: " + movRegVal);
-        System.out.println("  Arg1 es registro?: " + movRegVal.esRegistro(1));
-        System.out.println("  Arg1 como entero: " + movRegVal.getArgumentoComoEntero(1));
-
-        Instruccion intFin = new Instruccion("INT", Arrays.asList("20H"));
-        System.out.println("Caso 5: " + intFin);
-        System.out.println("  Codigo interrupcion: " + intFin.getCodigoInterrupcion(0));
-
+        System.out.println("Configuracion:");
+        System.out.println("  Memoria total:      " + tamanoMemoria);
+        System.out.println("  Kernel:             0 .. " + (limiteKernel - 1));
+        System.out.println("  Usuario:            " + limiteKernel + " .. " + (tamanoMemoria - 1));
+        System.out.println("  Tamano particion:   " + particionador.getTamanoParticion());
+        System.out.println("  Max procesos:       " + maxProcesos);
         System.out.println();
-    }
 
-    /* ==================== PRUEBAS DE Ensamblador ==================== */
+        // --- 2. Cargar archivos .asm ---
+        // (Deben estar en la raíz del proyecto)
+        cargarArchivo(gestor, "C:\\Users\\julia\\Documents\\Sistemas Operativos\\Proyecto 1\\Ejemplos\\ejemplo.asm");
+        cargarArchivo(gestor, "C:\\Users\\julia\\Documents\\Sistemas Operativos\\Proyecto 1\\Ejemplos\\ejemplo2.asm");
+        cargarArchivo(gestor, "C:\\Users\\julia\\Documents\\Sistemas Operativos\\Proyecto 1\\Ejemplos\\ejemplo3.asm");
 
-    private static void probarEnsamblador() {
-        System.out.println("========== PRUEBAS DE Ensamblador ==========\n");
-
-        File valido = new File("programa_prueba.asm");
-        probarArchivo(valido);
-
+        System.out.println("\nCola de trabajos despues de cargar:");
+        mostrarCola(listaDeTrabajos);
         System.out.println();
-    }
 
-    private static void probarArchivo(File archivo) {
-        Ensamblador ensamblador = new Ensamblador();
+        // --- 3. Ejecución paso a paso ---
+        System.out.println("========== EJECUCION PASO A PASO ==========\n");
 
-        System.out.println("Archivo: " + archivo.getAbsolutePath());
+        int paso = 1;
+        while (gestor.hayProcesosActivos() && paso <= 30) {
+            System.out.println("--- Paso " + paso + " ---");
 
-        if (!ensamblador.esArchivoValido(archivo)) {
-            System.out.println("  VALIDACION FALLIDA");
-            System.out.println("  Errores encontrados:");
-            for (String error : ensamblador.getErroresEncontrados()) {
-                System.out.println("   - " + error);
+            BCP antes = gestor.getProcesoActual();
+            if (antes != null) {
+                System.out.println("  Proceso en CPU: ID=" + antes.getId()
+                        + ", peso pendiente=" + antes.getPesoPendiente()
+                        + ", PC=" + antes.getPc());
+            } else {
+                System.out.println("  (no hay proceso en CPU)");
             }
+
+            boolean ejecutado = gestor.ejecutarUnPaso();
+            if (!ejecutado) {
+                System.out.println("  No quedan procesos para ejecutar.");
+                break;
+            }
+
+            BCP despues = gestor.getProcesoActual();
+            if (despues != null) {
+                System.out.println("  Despues: ID=" + despues.getId()
+                        + ", estado=" + despues.getEstado()
+                        + ", peso pendiente=" + despues.getPesoPendiente()
+                        + ", PC=" + despues.getPc()
+                        + ", AC=" + despues.getAc()
+                        + ", AX=" + despues.getAx()
+                        + ", BX=" + despues.getBx()
+                        + ", DX=" + despues.getDx());
+            }
+            System.out.println("  Cola:");
+            mostrarCola(listaDeTrabajos);
+            System.out.println();
+            paso++;
+        }
+
+        // --- 4. Mostrar estado final ---
+        System.out.println("========== ESTADISTICAS FINALES ==========\n");
+
+        if (gestor.getProcesosTerminados().isEmpty()) {
+            System.out.println("  (no hay procesos terminados)");
+        } else {
+            for (BCP bcp : gestor.getProcesosTerminados()) {
+                System.out.println("  Proceso " + bcp.getId()
+                        + ": inicio=" + bcp.getTiempoInicio()
+                        + ", fin=" + bcp.getTiempoFin()
+                        + ", duracion=" + bcp.getDuracionSegundos() + "s"
+                        + ", estado final=" + bcp.getEstado());
+            }
+        }
+        System.out.println();
+    }
+
+    private static void cargarArchivo(GestorProcesos gestor, String nombreArchivo) {
+        File archivo = new File(nombreArchivo);
+        System.out.print("Cargando " + nombreArchivo + " ... ");
+
+        if (!archivo.exists()) {
+            System.out.println("NO EXISTE (ignorado)");
             return;
         }
 
-        System.out.println("  VALIDACION OK");
+        ResultadoCarga resultado = gestor.cargarPrograma(archivo);
 
-        List<Instruccion> instrucciones = ensamblador.leerArchivo(archivo);
-        System.out.println("  Instrucciones leidas: " + instrucciones.size());
-        System.out.println("  Listado:");
-
-        int i = 1;
-        for (Instruccion instr : instrucciones) {
-            System.out.println("   " + i + ". " + instr);
-            i++;
-        }
-    }
-
-    /* ==================== PRUEBAS DE EjecutorCPU (básico) ==================== */
-
-    private static void probarEjecutorCPU() {
-        System.out.println("========== PRUEBAS DE EjecutorCPU ==========\n");
-
-        int limiteKernel = 32;
-        Memoria memoria = new Memoria(256, limiteKernel);
-        CPU cpu = new CPU(limiteKernel);
-        BCP bcp = new BCP(1, 1, limiteKernel, 7);
-
-        memoria.registrarBCP(bcp);
-        System.out.println("BCP registrado en direccion: " + bcp.getDireccion());
-        System.out.println("PC inicial de la CPU: " + cpu.getPC());
-        System.out.println();
-
-        int pos = limiteKernel;
-        memoria.escribir(pos++, new Instruccion("MOV", Arrays.asList("AX", "5")));
-        memoria.escribir(pos++, new Instruccion("MOV", Arrays.asList("BX", "3")));
-        memoria.escribir(pos++, new Instruccion("ADD", Arrays.asList("BX")));
-        memoria.escribir(pos++, new Instruccion("INT", Arrays.asList("10H")));
-        memoria.escribir(pos++, new Instruccion("MOV", Arrays.asList("DX", "42")));
-        memoria.escribir(pos++, new Instruccion("INT", Arrays.asList("10H")));
-        memoria.escribir(pos++, new Instruccion("INT", Arrays.asList("20H")));
-
-        System.out.println("Programa cargado: 7 instrucciones desde posicion " + limiteKernel);
-        System.out.println();
-
-        EjecutorCPU ejecutor = new EjecutorCPU(cpu, memoria, bcp);
-
-        int paso = 1;
-        while (!ejecutor.isProgramaTerminado()) {
-            System.out.println("--- Paso " + paso + " ---");
-            System.out.println("  Antes   -> PC=" + cpu.getPC()
-                    + ", AC=" + cpu.getAC()
-                    + ", AX=" + cpu.getAX()
-                    + ", BX=" + cpu.getBX()
-                    + ", DX=" + cpu.getDX()
-                    + ", IR=" + cpu.getIR());
-
-            ejecutor.ejecutarInstruccion();
-
-            System.out.println("  Despues -> PC=" + cpu.getPC()
-                    + ", AC=" + cpu.getAC()
-                    + ", AX=" + cpu.getAX()
-                    + ", BX=" + cpu.getBX()
-                    + ", DX=" + cpu.getDX()
-                    + ", IR=" + cpu.getIR());
-            System.out.println();
-
-            paso++;
-            if (paso > 20) {
-                System.out.println("!! Demasiados pasos, algo anda mal.");
+        switch (resultado.getEstado()) {
+            case EXITO:
+                System.out.println("OK (ID=" + resultado.getBcp().getId() + ")");
                 break;
-            }
+            case ERROR:
+                System.out.println("ERROR: " + resultado.getMensajeError());
+                break;
+            case EN_ESPERA:
+                System.out.println("EN ESPERA (no hay particion libre)");
+                break;
         }
-
-        System.out.println("=== Estado final del BCP ===");
-        System.out.println("  ID:            " + bcp.getId());
-        System.out.println("  Estado:        " + bcp.getEstado());
-        System.out.println("  PC:            " + bcp.getPc());
-        System.out.println("  AC:            " + bcp.getAc());
-        System.out.println("  AX:            " + bcp.getAx());
-        System.out.println("  BX:            " + bcp.getBx());
-        System.out.println("  DX:            " + bcp.getDx());
-        System.out.println("  IR:            " + bcp.getIr());
-        System.out.println("  Tiempo fin:    " + bcp.getTiempoFin());
-        System.out.println();
     }
 
-    /* ==================== PRUEBA DE SALTOS ==================== */
-
-    private static void probarSaltos() {
-        System.out.println("========== TEST DE SALTOS ==========\n");
-
-        int limiteKernel = 32;
-        Memoria mem = new Memoria(256, limiteKernel);
-        CPU cpu = new CPU(limiteKernel);
-        BCP bcp = new BCP(2, 1, limiteKernel, 5);
-        mem.registrarBCP(bcp);
-
-        // Programa:
-        //   pos 32: MOV AX, 1
-        //   pos 33: JMP +2        -> debe saltar a pos 36
-        //   pos 34: MOV AX, 99    -> NO se ejecuta
-        //   pos 35: MOV AX, 98    -> NO se ejecuta
-        //   pos 36: INT 20H
-        int p = limiteKernel;
-        mem.escribir(p++, new Instruccion("MOV", Arrays.asList("AX", "1")));
-        mem.escribir(p++, new Instruccion("JMP", Arrays.asList("+2")));
-        mem.escribir(p++, new Instruccion("MOV", Arrays.asList("AX", "99")));
-        mem.escribir(p++, new Instruccion("MOV", Arrays.asList("AX", "98")));
-        mem.escribir(p++, new Instruccion("INT", Arrays.asList("20H")));
-
-        EjecutorCPU ejecutor = new EjecutorCPU(cpu, mem, bcp);
-
-        // Paso 1
-        ejecutor.ejecutarInstruccion();
-        System.out.println("Tras MOV AX,1 -> PC=" + cpu.getPC() + ", AX=" + cpu.getAX());
-        System.out.println("   Esperado: PC=33, AX=1");
-
-        // Paso 2 (JMP)
-        ejecutor.ejecutarInstruccion();
-        System.out.println("Tras JMP +2   -> PC=" + cpu.getPC() + ", AX=" + cpu.getAX());
-        System.out.println("   Esperado: PC=36, AX=1   (fix correcto)");
-        System.out.println("   Si sale PC=35 -> off-by-one");
-        System.out.println("   Si sale PC=34 -> bug viejo");
-
-        // Paso 3 (INT)
-        ejecutor.ejecutarInstruccion();
-        System.out.println("Tras INT 20H  -> PC=" + cpu.getPC()
-                + ", estado=" + bcp.getEstado());
-        System.out.println("   Esperado: PC=36, estado=EXIT");
-        System.out.println();
+    private static void mostrarCola(ListaDeTrabajos lista) {
+        if (lista.estaVacia()) {
+            System.out.println("    (vacia)");
+            return;
+        }
+        for (BCP bcp : lista.toList()) {
+            System.out.println("    -> ID=" + bcp.getId()
+                    + ", estado=" + bcp.getEstado()
+                    + ", PC=" + bcp.getPc()
+                    + ", prio=" + bcp.getPrioridad());
+        }
     }
 
-    /* ==================== PRUEBA DE PILA (desbordamiento) ==================== */
-
-    private static void probarPila() {
-        System.out.println("========== TEST DE PILA (desbordamiento) ==========\n");
-
-        int limiteKernel = 32;
-        Memoria mem = new Memoria(256, limiteKernel);
-        CPU cpu = new CPU(limiteKernel);
-        BCP bcp = new BCP(3, 1, limiteKernel, 8);
-        mem.registrarBCP(bcp);
-
-        // El proceso hace PUSH 6 veces. La pila tiene capacidad 5.
-        // En el 6to PUSH debe lanzar IllegalStateException, capturarse,
-        // y el proceso terminar en EXIT.
-        //
-        // AX = 7 para que se note el valor apilado.
-        int p = limiteKernel;
-        mem.escribir(p++, new Instruccion("MOV", Arrays.asList("AX", "7")));
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 1
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 2
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 3
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 4
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 5 -> pila llena
-        mem.escribir(p++, new Instruccion("PUSH", Arrays.asList("AX")));  // 6 -> DEBE FALLAR
-        mem.escribir(p++, new Instruccion("INT", Arrays.asList("20H")));
-
-        EjecutorCPU ejecutor = new EjecutorCPU(cpu, mem, bcp);
-
-        System.out.println("Ejecutando hasta el final (esperando error de pila)...");
-        System.out.println();
-
-        int contador = ejecutor.ejecutarHastaTerminar();
-
-        System.out.println();
-        System.out.println("Instrucciones ejecutadas: " + contador);
-        System.out.println("Estado final del BCP:     " + bcp.getEstado());
-        System.out.println("Tamano de pila final:     " + bcp.getPila().size());
-        System.out.println("Tiempo fin:               " + bcp.getTiempoFin());
-        System.out.println();
-        System.out.println("   Esperado: estado=EXIT, pila=5, error en consola");
-        System.out.println();
+    private static void mostrarBCPs(Memoria memoria) {
+        System.out.println("BCPs registrados en la zona kernel:");
+        for (BCP bcp : memoria.getBCPsRegistrados()) {
+            System.out.println("  ID=" + bcp.getId()
+                    + ", estado=" + bcp.getEstado()
+                    + ", PC=" + bcp.getPc()
+                    + ", AC=" + bcp.getAc()
+                    + ", duracion=" + bcp.getDuracionSegundos() + "s");
+        }
+        if (memoria.getCantidadBCPs() == 0) {
+            System.out.println("  (ninguno)");
+        }
     }
 }

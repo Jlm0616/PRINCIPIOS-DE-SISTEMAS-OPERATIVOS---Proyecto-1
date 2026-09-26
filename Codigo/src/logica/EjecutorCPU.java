@@ -9,18 +9,21 @@ import modelo.Memoria;
 /**
  * Ejecutor del ciclo de instrucción (fetch-decode-execute) para el Proyecto 1.
  *
- * A diferencia de la Tarea 1:
- *   - Las instrucciones se leen como objetos Instruccion desde Memoria.
- *   - Ya no hay Traductor: la codificación binaria desaparece.
- *   - El BCP es un objeto persistente que refleja el estado del proceso.
- *   - Se soporta el conjunto ampliado de instrucciones (~16).
- *   - Se manejan interrupciones (INT 20H, 10H, 09H, 21H).
+ * Modelo de tiempo:
+ *   - Cada instrucción tiene un "peso" (segundos de CPU) definido en
+ *     Instruccion.getPeso(), según la tabla del enunciado.
+ *   - El botón "Siguiente" de la GUI = 1 segundo de CPU.
+ *   - Una instrucción de peso N tarda N segundos en completarse.
+ *   - Las instrucciones son ATÓMICAS: el cambio de contexto ocurre solo
+ *     al completarse una instrucción (Stallings, sección 3.4).
+ *   - El peso pendiente vive en el BCP (estado del proceso), para que
+ *     sobreviva a un cambio de contexto (round-robin).
  *
- * Ciclo de ejecución de UNA instrucción:
- *   1. Fetch:  leer la instrucción en la posición del PC.
- *   2. Decode: identificar el opcode y sus argumentos (ya vienen parseados).
- *   3. Execute: ejecutar la operación correspondiente.
- *   4. Update:  avanzar el PC (salvo saltos) y sincronizar CPU -> BCP.
+ * Ciclo:
+ *   1. Si no hay instrucción en curso, leer la del PC y calcular su peso.
+ *   2. Consumir 1 segundo del peso pendiente.
+ *   3. Si el peso llega a 0: ejecutar la instrucción completa
+ *      (efectos + avance de PC + sincronización con BCP).
  */
 public class EjecutorCPU {
 
@@ -28,8 +31,12 @@ public class EjecutorCPU {
     private Memoria memoria;
     private BCP bcp;
 
-    /** Indica si el programa ya terminó (INT 20H o EXIT). */
+    /** Indica si el programa ya terminó (INT 20H, EXIT, o error fatal). */
     private boolean programaTerminado;
+
+    /** Máximo de segundos de CPU en modo automático antes de considerar
+     *  el proceso colgado (salvaguarda). */
+    public static final int MAX_CICLOS_AUTOMATICO = 10000;
 
     /**
      * Crea un ejecutor asociado a una CPU, una memoria y un BCP.
@@ -45,32 +52,54 @@ public class EjecutorCPU {
         this.programaTerminado = false;
     }
 
-    /* ==================== CICLO PRINCIPAL ==================== */
+    /* ==================== CICLO PRINCIPAL (por segundo) ==================== */
 
     /**
-     * Ejecuta UNA instrucción del programa del BCP actual (fetch-decode-execute).
+     * Ejecuta UN SEGUNDO de CPU del proceso actual.
      *
-     * @throws IllegalStateException si el programa ya terminó o no hay instrucción
+     * Si no había instrucción en curso, la carga y calcula su peso.
+     * Consume 1 unidad de peso. Si el peso llega a 0, ejecuta la
+     * instrucción completa (efectos + avance de PC + sincronización).
+     *
+     * El peso pendiente vive en el BCP para que sobreviva a un cambio
+     * de contexto (round-robin).
+     *
+     * @return true si la instrucción se completó en este segundo
+     * @throws IllegalStateException si el programa ya terminó o no hay
+     *         instrucción en la posición del PC
      */
-    public void ejecutarInstruccion() {
+    public boolean ejecutarSegundoDeCPU() {
         if (programaTerminado) {
-            throw new IllegalStateException(
-                "El programa del proceso " + bcp.getId() + " ya terminó.");
+            return false;
         }
 
+        // 1. Si no hay instrucción en curso, cargarla y calcular su peso
+        if (bcp.getPesoPendiente() == 0) {
+            int pc = cpu.getPC();
+            Instruccion instr = memoria.leerInstruccion(pc);
+
+            if (instr == null) {
+                throw new IllegalStateException(
+                    "No hay instrucción en la posición " + pc
+                    + " (proceso " + bcp.getId() + ")");
+            }
+
+            bcp.setPesoPendiente(instr.getPeso());
+            cpu.setIR(pc);
+        }
+
+        // 2. Consumir 1 segundo
+        bcp.setPesoPendiente(bcp.getPesoPendiente() - 1);
+
+        // 3. ¿Se completó la instrucción?
+        if (bcp.getPesoPendiente() > 0) {
+            return false;   // todavía no
+        }
+
+        // 4. Instrucción completada: ejecutar efectos
         int pc = cpu.getPC();
         Instruccion instr = memoria.leerInstruccion(pc);
 
-        if (instr == null) {
-            throw new IllegalStateException(
-                "No hay instrucción en la posición " + pc
-                + " (proceso " + bcp.getId() + ")");
-        }
-
-        // Guardar en IR el PC de la instrucción actual (informativo)
-        cpu.setIR(pc);
-
-        // Ejecutar. Devuelve true si la instrucción modificó el PC (salto).
         boolean saltoEjecutado;
         try {
             saltoEjecutado = ejecutarOperacion(instr, pc);
@@ -83,31 +112,42 @@ public class EjecutorCPU {
             bcp.actualizarDesdeCPU(cpu);
             System.out.println("[ERROR FATAL] Proceso " + bcp.getId()
                     + " terminado: " + e.getMessage());
-            return;   // el proceso queda en EXIT, no se propaga la excepción
+            return true;
         }
 
-        // Avanzar el PC salvo que la instrucción haya sido un salto
+        // 5. Avanzar el PC salvo que la instrucción haya sido un salto
         if (!saltoEjecutado) {
             cpu.setPC(pc + 1);
         }
 
-        // Sincronizar CPU -> BCP
+        // 6. Sincronizar CPU -> BCP
         bcp.actualizarDesdeCPU(cpu);
+
+        return true;
     }
 
     /**
      * Ejecuta el programa completo hasta que termine (INT 20H, EXIT, o error fatal).
      * Pensado para el modo "Automático" de la GUI.
      *
-     * @return cantidad de instrucciones ejecutadas
+     * @return cantidad de segundos de CPU consumidos
      */
     public int ejecutarHastaTerminar() {
-        int contador = 0;
-        while (!programaTerminado) {
-            ejecutarInstruccion();
-            contador++;
+        int segundos = 0;
+        while (!programaTerminado && segundos < MAX_CICLOS_AUTOMATICO) {
+            ejecutarSegundoDeCPU();
+            segundos++;
         }
-        return contador;
+        if (segundos >= MAX_CICLOS_AUTOMATICO) {
+            System.out.println("[WARNING] Proceso " + bcp.getId()
+                    + " alcanzó el máximo de segundos (" + MAX_CICLOS_AUTOMATICO
+                    + "). Posible ciclo infinito. Terminando por seguridad.");
+            bcp.setEstado(EstadoProceso.EXIT);
+            bcp.marcarFin();
+            programaTerminado = true;
+            bcp.actualizarDesdeCPU(cpu);
+        }
+        return segundos;
     }
 
     /* ==================== EJECUCIÓN POR OPCODE ==================== */
@@ -135,21 +175,23 @@ public class EjecutorCPU {
                 ejecutarMOV(instr);
                 return false;
 
-            case "ADD":
+            case "ADD": {
                 int suma = cpu.getAC() + leerRegistro(instr.getArgumento(0));
                 if (suma > 32767 || suma < -32768) {
                     cpu.setOverflow(true);
                 }
                 cpu.setAC(limitarA16Bits(suma));
                 return false;
+            }
 
-            case "SUB":
+            case "SUB": {
                 int resta = cpu.getAC() - leerRegistro(instr.getArgumento(0));
                 if (resta > 32767 || resta < -32768) {
                     cpu.setOverflow(true);
                 }
                 cpu.setAC(limitarA16Bits(resta));
                 return false;
+            }
 
             case "INC":
                 ejecutarINC(instr);
@@ -211,28 +253,16 @@ public class EjecutorCPU {
 
     /* ==================== HELPERS POR INSTRUCCIÓN ==================== */
 
-    /**
-     * Ejecuta MOV. Soporta:
-     *   MOV reg_destino, reg_origen
-     *   MOV reg_destino, valor
-     */
     private void ejecutarMOV(Instruccion instr) {
         String destino = instr.getArgumento(0);
 
         if (instr.cantidadArgumentos() >= 2 && instr.esRegistro(1)) {
-            // MOV reg, reg
             escribirRegistro(destino, leerRegistro(instr.getArgumento(1)));
         } else {
-            // MOV reg, valor
             escribirRegistro(destino, instr.getArgumentoComoEntero(1));
         }
     }
 
-    /**
-     * Ejecuta INC. Soporta:
-     *   INC        -> AC = AC + 1
-     *   INC reg    -> reg = reg + 1
-     */
     private void ejecutarINC(Instruccion instr) {
         if (instr.cantidadArgumentos() == 0) {
             cpu.setAC(limitarA16Bits(cpu.getAC() + 1));
@@ -242,11 +272,6 @@ public class EjecutorCPU {
         }
     }
 
-    /**
-     * Ejecuta DEC. Soporta:
-     *   DEC        -> AC = AC - 1
-     *   DEC reg    -> reg = reg - 1
-     */
     private void ejecutarDEC(Instruccion instr) {
         if (instr.cantidadArgumentos() == 0) {
             cpu.setAC(limitarA16Bits(cpu.getAC() - 1));
@@ -256,9 +281,6 @@ public class EjecutorCPU {
         }
     }
 
-    /**
-     * Ejecuta SWAP reg1, reg2 (intercambia los valores).
-     */
     private void ejecutarSWAP(Instruccion instr) {
         String r1 = instr.getArgumento(0);
         String r2 = instr.getArgumento(1);
@@ -268,9 +290,6 @@ public class EjecutorCPU {
         escribirRegistro(r2, v1);
     }
 
-    /**
-     * Ejecuta CMP reg1, reg2. Deja el resultado en la banderaIgual de la CPU.
-     */
     private void ejecutarCMP(Instruccion instr) {
         int v1 = leerRegistro(instr.getArgumento(0));
         int v2 = leerRegistro(instr.getArgumento(1));
@@ -312,25 +331,11 @@ public class EjecutorCPU {
 
     /* ==================== HELPERS GENERALES ==================== */
 
-    /**
-     * Trunca un valor a 16 bits con signo (complemento a 2).
-     * Simula el comportamiento de un registro real de 16 bits.
-     *
-     * @param valor valor a truncar
-     * @return valor truncado a 16 bits con signo
-     */
     private int limitarA16Bits(int valor) {
         int v = valor & 0xFFFF;
         return (v >= 32768) ? v - 65536 : v;
     }
 
-    /**
-     * Lee el valor de un registro de la CPU.
-     *
-     * @param nombre nombre del registro ("AC", "AX", "BX", "CX", "DX")
-     * @return el valor del registro
-     * @throws IllegalArgumentException si el nombre no es válido
-     */
     private int leerRegistro(String nombre) {
         switch (nombre) {
             case "AC": return cpu.getAC();
@@ -343,13 +348,6 @@ public class EjecutorCPU {
         }
     }
 
-    /**
-     * Escribe un valor en un registro de la CPU.
-     *
-     * @param nombre nombre del registro ("AC", "AX", "BX", "CX", "DX")
-     * @param valor  valor a escribir (se trunca a 16 bits)
-     * @throws IllegalArgumentException si el nombre no es válido
-     */
     private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
         switch (nombre) {
@@ -365,12 +363,10 @@ public class EjecutorCPU {
 
     /* ==================== GETTERS ==================== */
 
-    /** @return el BCP asociado a este ejecutor. */
     public BCP getBcp() {
         return bcp;
     }
 
-    /** @return true si el programa ya terminó. */
     public boolean isProgramaTerminado() {
         return programaTerminado;
     }
