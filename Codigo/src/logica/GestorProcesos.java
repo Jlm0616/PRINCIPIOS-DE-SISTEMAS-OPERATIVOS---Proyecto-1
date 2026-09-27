@@ -13,26 +13,12 @@ import java.util.List;
 /**
  * Fachada de orquestación del ciclo de vida y ejecución de procesos.
  *
- * Su única responsabilidad es COORDINAR las clases especializadas:
- *   - ListaDeTrabajos     (estructura de la cola FCFS)
- *   - Planificador        (decide quién sigue)
- *   - Despachador         (cambio de contexto + ejecución)
- *   - ParticionadorFijo   (asignación de memoria)
- *   - Ensamblador         (validación y parseo de .asm)
- *
- * NO implementa la lógica de ninguna de esas clases; solo las usa.
- *
- * Modelo de ejecución:
- *   - 1 paso de simulación = 1 segundo de CPU.
- *   - Cada instrucción tiene un peso (segundos de CPU); una instrucción
- *     de peso N tarda N pasos en completarse.
- *   - Las instrucciones son atómicas: si el peso pendiente es > 0,
- *     el proceso NO se reencola (sigue ejecutando la misma instrucción).
- *   - FCFS no apropiativo: el proceso sigue ejecutando hasta terminar
- *     o bloquearse por E/S.
- *   - Si el proceso termina (INT 20H o error), se libera su partición.
+ * ... (Javadoc igual al tuyo) ...
  */
 public class GestorProcesos {
+
+    /** Máximo de procesos permitidos en el sistema (restricción del enunciado). */
+    public static final int MAX_PROCESOS = 5;
 
     private Memoria memoria;
     private CPU cpu;
@@ -42,8 +28,9 @@ public class GestorProcesos {
     private ParticionadorFijo particionador;
 
     private int siguienteId;
-    private List<File> archivosEnEspera;
-    private List<BCP> procesosTerminados;
+    private List<BCPTerminado> procesosTerminados;
+    private List<BCP> procesosBloqueados;
+    private List<ProcesoEnEspera> procesosEnEspera;
 
     public GestorProcesos(Memoria memoria, CPU cpu, ListaDeTrabajos listaDeTrabajos,
                           ParticionadorFijo particionador) {
@@ -54,16 +41,20 @@ public class GestorProcesos {
         this.planificador = new Planificador(listaDeTrabajos);
         this.despachador = new Despachador(cpu);
         this.siguienteId = 1;
-        this.archivosEnEspera = new ArrayList<>();
         this.procesosTerminados = new ArrayList<>();
+        this.procesosBloqueados = new ArrayList<>();
+        this.procesosEnEspera = new ArrayList<>();
     }
 
     /* ==================== CREACIÓN DE PROCESOS ==================== */
 
-    /**
-     * Intenta cargar un archivo .asm como proceso nuevo.
-     */
     public ResultadoCarga cargarPrograma(File archivo) {
+        if (getTotalProcesos() >= MAX_PROCESOS) {
+            return ResultadoCarga.error(
+                "Ya hay " + MAX_PROCESOS + " procesos en el sistema (maximo permitido).\n"
+                + "Espera a que termine alguno o presiona 'Limpiar'.");
+        }
+
         Ensamblador ensamblador = new Ensamblador();
 
         if (!ensamblador.esArchivoValido(archivo)) {
@@ -80,7 +71,15 @@ public class GestorProcesos {
 
         int indice = particionador.asignarParticion();
         if (indice == -1) {
-            archivosEnEspera.add(archivo);
+            int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
+            if (direccionBase == -1) {
+                return ResultadoCarga.error(
+                    "No hay espacio en el kernel para registrar más BCPs.");
+            }
+            BCP bcp = new BCP(memoria, direccionBase, siguienteId++, 1);
+            bcp.setEstado(EstadoProceso.READY_SUSPEND);
+            bcp.setAlcance(instrucciones.size());
+            procesosEnEspera.add(new ProcesoEnEspera(bcp, archivo));
             return ResultadoCarga.enEspera();
         }
 
@@ -89,44 +88,21 @@ public class GestorProcesos {
     }
 
     private BCP crearProcesoEnParticion(List<Instruccion> instrucciones, int indiceParticion) {
-        int base = particionador.getBaseParticion(indiceParticion);
-        int alcance = instrucciones.size();
-
-        BCP bcp = new BCP(siguienteId++, 1, base, alcance);
-        bcp.setEstado(EstadoProceso.READY);   // admitido en la cola
-
-        memoria.registrarBCP(bcp);
-
-        int pos = base;
-        for (Instruccion instr : instrucciones) {
-            memoria.escribir(pos++, instr);
+        int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
+        if (direccionBase == -1) {
+            throw new IllegalStateException(
+                "No hay espacio en el kernel para registrar más BCPs.");
         }
 
-        listaDeTrabajos.agregar(bcp);
+        BCP bcp = new BCP(memoria, direccionBase, siguienteId++, 1);
+        admitirEnParticion(bcp, instrucciones, indiceParticion);
         return bcp;
     }
 
     /* ==================== EJECUCIÓN PASO A PASO ==================== */
 
-    /**
-    * Ejecuta un paso de simulación: 1 segundo de CPU del proceso actual.
-    *
-    * Flujo:
-    *   1. Si no hay proceso despachado, seleccionar el primero de la cola
-    *      y despacharlo.
-    *   2. Ejecutar 1 segundo de CPU.
-    *   3. Si el proceso terminó: liberar su partición y BCP.
-    *   4. Si el proceso sigue vivo y no bloqueado: sigue despachado,
-    *      ejecutará la siguiente instrucción en el próximo paso.
-    *   5. Si el proceso se bloquea (INT 09H): se guarda su contexto
-    *      y se libera la CPU para el siguiente.
-    *
-    * @return true si se ejecutó algo, false si no hay procesos
-     */
     public boolean ejecutarUnPaso() {
-        // 1. Si no hay proceso despachado, elegir uno
         if (!despachador.procesoActualOcupaCPU()) {
-            // Liberar el proceso anterior si terminó
             if (despachador.getEjecutorActual() != null) {
                 BCP anterior = despachador.getEjecutorActual().getBcp();
                 if (anterior.getEstado() == EstadoProceso.EXIT) {
@@ -135,43 +111,31 @@ public class GestorProcesos {
                 despachador.limpiarEjecutor();
             }
 
-            // Elegir el siguiente
             BCP siguiente = planificador.seleccionarSiguiente();
             if (siguiente == null) {
-                return false;   // no hay nada para ejecutar
+                return false;
             }
 
             listaDeTrabajos.sacarPrimero();
             despachador.despachar(siguiente, memoria);
         }
 
-        // 2. Ejecutar 1 segundo de CPU
         boolean sigueVivo = despachador.ejecutarUnPaso();
-
-        // 3. Evaluar resultado
         BCP actual = despachador.getEjecutorActual().getBcp();
 
         if (!sigueVivo) {
-            // El proceso terminó el programa entero (EXIT ya seteado por EjecutorCPU)
             procesoTerminado(actual);
             despachador.limpiarEjecutor();
         } else if (actual.getEstado() == EstadoProceso.BLOCKED) {
-            // FCFS no apropiativo: el proceso se bloqueó esperando E/S
-            // (por ejemplo, INT 09H esperando input del teclado).
-            // Se guarda su contexto y se libera la CPU para el siguiente.
             despachador.guardarContexto(actual);
             actual.setCpuAsignado(-1);
             despachador.limpiarEjecutor();
-            // (el proceso queda en BLOCKED; no se reencola todavía)
+            procesosBloqueados.add(actual);
         }
-        
+
         return true;
     }
 
-    /**
-     * Ejecuta el programa completo de forma automática.
-     * @return cantidad de pasos ejecutados
-     */
     public int ejecutarAutomatico() {
         int pasos = 0;
         while (hayProcesosActivos()) {
@@ -188,75 +152,123 @@ public class GestorProcesos {
     /* ==================== TERMINACIÓN ==================== */
 
     /**
-     * Se llama cuando un proceso termina: conserva su BCP para estadísticas,
-     * y libera su partición y su entrada en la zona kernel.
+     * Se llama cuando un proceso termina.
      *
-     * El BCP se conserva en {@link #procesosTerminados} siguiendo el modelo
-     * descrito por Stallings (sección 3.2): la información del proceso se
-     * preserva temporalmente para que programas auxiliares (estadísticas,
-     * contabilidad) extraigan los datos que necesiten.
+     * Pasos:
+     *   1. Marcar estado final en el BCP (EXIT).
+     *   2. Crear un snapshot (BCPTerminado) ANTES de liberar el BCP.
+     *   3. Agregar el snapshot a procesosTerminados.
+     *   4. Liberar la particion de usuario.
+     *   5. Liberar el bloque del BCP en el kernel.
+     *   6. Intentar admitir el siguiente proceso en espera.
      */
     public void procesoTerminado(BCP bcp) {
-        this.procesosTerminados.add(bcp);
-        
-        int indice = particionador.indiceDesdePosicion(bcp.getBase());
-        particionador.liberarParticion(indice);
-        memoria.liberarBCP(bcp.getDireccion());
-
+        // 1. Marcar estado final
         bcp.setEstado(EstadoProceso.EXIT);
         bcp.marcarFin();
         bcp.setCpuAsignado(-1);
 
-        // Intentar cargar el siguiente archivo en espera
-        if (!archivosEnEspera.isEmpty()) {
-            File siguiente = archivosEnEspera.remove(0);
-            cargarPrograma(siguiente);
+        // 2. Crear snapshot ANTES de liberar el BCP
+        BCPTerminado snapshot = new BCPTerminado(
+            bcp.getId(),
+            bcp.getEstado(),
+            bcp.getTiempoInicio(),
+            bcp.getTiempoFin(),
+            bcp.getBase(),
+            bcp.getAlcance(),
+            bcp.getPrioridad()
+        );
+
+        // 3. Agregar snapshot a la lista de terminados
+        this.procesosTerminados.add(snapshot);
+
+        // 4. Copiar base y alcance a variables locales (ANTES de liberar el BCP)
+        int base = bcp.getBase();
+        int alcance = bcp.getAlcance();
+
+        // 5. Liberar la particion de usuario
+        int indice = particionador.indiceDesdePosicion(base);
+        particionador.liberarParticion(indice);
+
+        // 6. Limpiar las posiciones de la zona usuario
+        for (int i = 0; i < alcance; i++) {
+            memoria.escribir(base + i, null);
         }
+
+        // 7. Liberar el bloque del BCP en el kernel
+        memoria.liberarBloque(bcp.getDireccionBase(), BCP.POSICIONES_REQUERIDAS);
+
+        // 8. Intentar admitir el siguiente proceso en espera
+        if (!procesosEnEspera.isEmpty()) {
+            ProcesoEnEspera pendiente = procesosEnEspera.remove(0);
+            Ensamblador ens = new Ensamblador();
+            List<Instruccion> instr = ens.leerArchivo(pendiente.getArchivo());
+            int indiceNuevo = particionador.asignarParticion();
+            if (indiceNuevo != -1) {
+                admitirEnParticion(pendiente.getBcp(), instr, indiceNuevo);
+            } else {
+                procesosEnEspera.add(0, pendiente);
+            }
+        }
+    }
+
+    private void admitirEnParticion(BCP bcp, List<Instruccion> instrucciones, int indiceParticion) {
+        int base = particionador.getBaseParticion(indiceParticion);
+        bcp.setBase(base);
+        bcp.setAlcance(instrucciones.size());
+        bcp.setPc(base);
+        bcp.setEstado(EstadoProceso.READY);
+
+        int pos = base;
+        for (Instruccion instr : instrucciones) {
+            memoria.escribir(pos++, instr);
+        }
+
+        listaDeTrabajos.agregar(bcp);
     }
 
     /* ==================== CONSULTAS PARA LA GUI ==================== */
 
-    /** @return true si hay procesos en la cola o en ejecución. */
-    public boolean hayProcesosActivos() {
-        return !listaDeTrabajos.estaVacia() || despachador.procesoActualOcupaCPU();
+    public int getTotalProcesos() {
+        return listaDeTrabajos.getCantidad()
+             + procesosBloqueados.size()
+             + procesosEnEspera.size()
+             + (despachador.getEjecutorActual() != null ? 1 : 0);
     }
 
-    /**
-     * @return el BCP del proceso que "representa" el estado actual:
-     *         - Si hay uno en ejecucion, ese.
-     *         - Si no, el primero de la lista de trabajos (el proximo a ejecutar).
-     *         - Si no hay ninguno, null.
-     */
+    public boolean hayProcesosActivos() {
+        return !listaDeTrabajos.estaVacia()
+            || despachador.procesoActualOcupaCPU()
+            || !procesosBloqueados.isEmpty();
+    }
+
     public BCP getProcesoActual() {
-        // 1. Si hay uno en ejecucion, devolverlo
         if (despachador.getEjecutorActual() != null) {
             return despachador.getEjecutorActual().getBcp();
         }
-
-        // 2. Si no, devolver el primero de la lista
         if (!listaDeTrabajos.estaVacia()) {
             return listaDeTrabajos.verPrimero();
         }
-
-        // 3. Nada
         return null;
     }
 
-    /** @return la lista de trabajos (para mostrar en la GUI). */
     public ListaDeTrabajos getListaDeTrabajos() {
         return listaDeTrabajos;
     }
 
-    /** @return cantidad de archivos esperando espacio en memoria. */
     public int getCantidadEnEspera() {
-        return archivosEnEspera.size();
+        return procesosEnEspera.size();
     }
-    
-    /**
-    * @return lista de procesos que ya terminaron (EXIT o error fatal),
-    *         conservados para estadísticas.
-    */
-   public List<BCP> getProcesosTerminados() {
-       return procesosTerminados;
-   }
+
+    public List<BCPTerminado> getProcesosTerminados() {
+        return procesosTerminados;
+    }
+
+    public List<BCP> getProcesosBloqueados() {
+        return procesosBloqueados;
+    }
+
+    public List<ProcesoEnEspera> getProcesosEnEspera() {
+        return procesosEnEspera;
+    }
 }

@@ -3,26 +3,27 @@ package logica;
 import modelo.BCP;
 import modelo.EstadoProceso;
 
+import java.util.LinkedList;
+
 /**
- * Lista de trabajos: cola enlazada de BCPs (FCFS).
+ * Lista de trabajos: cola FCFS de BCPs.
  *
- * Es una lista enlazada real (no una List<BCP> de Java) porque así lo
- * describe el Stallings en la sección 3.3 (Figura 3.14, "Process List
- * Structures"): cada BCP apunta al siguiente usando su campo siguienteBCP.
+ * Usa una lista doblemente enlazada interna (LinkedList) para la
+ * gestion O(1) en ambos extremos.
+ *
+ * El campo siguienteBCP del BCP se mantiene como informativo: guarda
+ * la direccion del siguiente BCP en el kernel (se actualiza al agregar),
+ * para que la GUI pueda visualizar el enlace.
  *
  * Esta clase SOLO gestiona la estructura. NO decide qué proceso ejecutar
  * (eso es del Planificador) ni cómo ejecutarlo (eso es del Despachador).
  */
 public class ListaDeTrabajos {
 
-    private BCP primero;   // cabeza de la lista
-    private BCP ultimo;    // cola de la lista (para insertar en O(1))
-    private int cantidad;
+    private final LinkedList<BCP> lista;
 
     public ListaDeTrabajos() {
-        this.primero = null;
-        this.ultimo = null;
-        this.cantidad = 0;
+        this.lista = new LinkedList<>();
     }
 
     /**
@@ -32,17 +33,9 @@ public class ListaDeTrabajos {
         if (bcp == null) {
             throw new IllegalArgumentException("No se puede agregar un BCP nulo");
         }
-        bcp.setSiguienteBCP(null);   // por si venía de otra lista
         bcp.setEstado(EstadoProceso.READY);
-
-        if (primero == null) {
-            primero = bcp;
-            ultimo = bcp;
-        } else {
-            ultimo.setSiguienteBCP(bcp);
-            ultimo = bcp;
-        }
-        cantidad++;
+        lista.addLast(bcp);
+        actualizarEnlaces();
     }
 
     /**
@@ -51,16 +44,11 @@ public class ListaDeTrabajos {
      * @return el primer BCP, o null si la lista está vacía
      */
     public BCP sacarPrimero() {
-        if (primero == null) {
+        if (lista.isEmpty()) {
             return null;
         }
-        BCP sacado = primero;
-        primero = primero.getSiguienteBCP();
-        sacado.setSiguienteBCP(null);
-        if (primero == null) {
-            ultimo = null;
-        }
-        cantidad--;
+        BCP sacado = lista.removeFirst();
+        actualizarEnlaces();
         return sacado;
     }
 
@@ -68,31 +56,41 @@ public class ListaDeTrabajos {
      * Devuelve (sin sacar) el primer BCP de la lista.
      */
     public BCP verPrimero() {
-        return primero;
+        return lista.isEmpty() ? null : lista.getFirst();
     }
 
     public boolean estaVacia() {
-        return primero == null;
+        return lista.isEmpty();
     }
 
     public int getCantidad() {
-        return cantidad;
+        return lista.size();
     }
 
     public BCP getUltimo() {
-        return ultimo;
+        return lista.isEmpty() ? null : lista.getLast();
     }
 
     /**
      * @return lista con todos los BCPs (para la GUI), sin modificar la enlazada.
      */
     public java.util.List<BCP> toList() {
-        java.util.List<BCP> lista = new java.util.ArrayList<>();
-        BCP actual = primero;
-        while (actual != null) {
-            lista.add(actual);
-            actual = actual.getSiguienteBCP();
+        return new java.util.ArrayList<>(lista);
+    }
+
+    /**
+     * Actualiza el campo siguienteBCP de cada BCP de la lista
+     * para que la GUI pueda visualizar el enlace en memoria.
+     */
+    private void actualizarEnlaces() {
+        for (int i = 0; i < lista.size(); i++) {
+            BCP actual = lista.get(i);
+            if (i + 1 < lista.size()) {
+                BCP siguiente = lista.get(i + 1);
+                actual.setSiguienteBCP(siguiente.getDireccionBase());
+            } else {
+                actual.setSiguienteBCP(-1);   // último: sin siguiente
+            }
         }
-        return lista;
     }
 }

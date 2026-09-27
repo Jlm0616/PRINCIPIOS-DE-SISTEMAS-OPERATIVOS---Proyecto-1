@@ -21,15 +21,12 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
 
 /**
  * Panel que muestra el contenido de la memoria principal.
  *
  * Arriba: barra de progreso con el porcentaje de uso.
- * Centro: tabla con Pos + Valor.
+ * Centro: tabla con Pos + Valor. La fila del IR se resalta en amarillo.
  * Abajo: boton toggle "Mostrar solo ocupadas / Mostrar todas".
  */
 public class PanelMemoria extends JPanel {
@@ -42,6 +39,7 @@ public class PanelMemoria extends JPanel {
     private boolean mostrarSoloOcupadas = false;
 
     private Memoria memoriaActual;
+    private int irActual = -1;
 
     public PanelMemoria() {
         construirInterfaz();
@@ -100,15 +98,32 @@ public class PanelMemoria extends JPanel {
         tabla.setFillsViewportHeight(true);
         tabla.getTableHeader().setFont(Paleta.FUENTE_LABEL_BOLD);
 
+        // Renderer: resaltar la fila del IR
         tabla.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
                     boolean isSelected, boolean hasFocus, int row, int column) {
                 Component c = super.getTableCellRendererComponent(
                         table, value, isSelected, hasFocus, row, column);
-                if (!isSelected) {
-                    c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+
+                if (isSelected) {
+                    return c;
                 }
+
+                // Obtener el numero de posicion de esta fila
+                Object posObj = table.getValueAt(row, 0);
+                if (posObj instanceof Integer && ((Integer) posObj) == irActual) {
+                    // Es la fila del IR: resaltar en amarillo
+                    c.setBackground(Paleta.AMARILLO_ADVERTENCIA);
+                    c.setForeground(Color.BLACK);
+                    setFont(Paleta.FUENTE_MONO_BOLD);
+                    return c;
+                }
+
+                // Filas alternas
+                c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+                c.setForeground(Paleta.TEXTO_NORMAL);
+                setFont(Paleta.FUENTE_MONO);
                 return c;
             }
         });
@@ -135,8 +150,15 @@ public class PanelMemoria extends JPanel {
         add(panelBoton, BorderLayout.SOUTH);
     }
 
-    public void actualizar(Memoria memoria) {
+    /**
+     * Actualiza la tabla con el contenido de la memoria dada.
+     *
+     * @param memoria memoria a mostrar
+     * @param ir      valor del IR (posicion a resaltar); -1 si no hay
+     */
+    public void actualizar(Memoria memoria, int ir) {
         this.memoriaActual = memoria;
+        this.irActual = ir;
         refrescar();
         actualizarBarra();
     }
@@ -157,6 +179,17 @@ public class PanelMemoria extends JPanel {
             }
             String valor = formatearContenido(contenido);
             modelo.addRow(new Object[]{i, valor});
+        }
+
+        // Scroll automatico a la fila del IR
+        if (irActual >= 0) {
+            for (int i = 0; i < modelo.getRowCount(); i++) {
+                Object posObj = modelo.getValueAt(i, 0);
+                if (posObj instanceof Integer && ((Integer) posObj) == irActual) {
+                    tabla.scrollRectToVisible(tabla.getCellRect(i, 0, true));
+                    break;
+                }
+            }
         }
     }
 

@@ -78,17 +78,17 @@ public class EjecutorCPU {
             int pc = cpu.getPC();
             Instruccion instr = memoria.leerInstruccion(pc);
 
-        if (instr == null) {
-            // No hay más instrucciones: el programa terminó sin INT 20H.
-            // Se marca el proceso como EXIT y se detiene limpiamente.
-            bcp.setEstado(EstadoProceso.EXIT);
-            bcp.marcarFin();
-            programaTerminado = true;
-            bcp.actualizarDesdeCPU(cpu);
-            System.out.println("[FIN] Proceso " + bcp.getId()
-                    + " terminó: no hay más instrucciones en la posición " + pc);
-            return true;
-        }
+            if (instr == null) {
+                // No hay más instrucciones: el programa terminó sin INT 20H.
+                // Se marca el proceso como EXIT y se detiene limpiamente.
+                bcp.setEstado(EstadoProceso.EXIT);
+                bcp.marcarFin();
+                programaTerminado = true;
+                bcp.actualizarDesdeCPU(cpu);
+                System.out.println("[FIN] Proceso " + bcp.getId()
+                        + " terminó: no hay más instrucciones en la posición " + pc);
+                return true;
+            }
 
             bcp.setPesoPendiente(instr.getPeso());
             cpu.setIR(pc);

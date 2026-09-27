@@ -3,6 +3,8 @@ package gui;
 import modelo.BCP;
 import modelo.EstadoProceso;
 import logica.ListaDeTrabajos;
+import logica.ProcesoEnEspera;
+import logica.BCPTerminado;
 
 import javax.swing.JPanel;
 import javax.swing.JTable;
@@ -19,18 +21,17 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Panel que muestra:
- *   - Arriba: la lista de procesos con su ID y estado.
- *   - Abajo: el BCP del proceso actual (el que esta en la CPU).
- *
- * Se actualiza con actualizarLista(ListaDeTrabajos, BCP) o
- * actualizarBCP(BCP).
+ *   - Arriba: TODOS los procesos (READY + RUNNING + BLOCKED + EXIT + READY_SUSPEND).
+ *   - Abajo: el BCP del proceso actual.
  */
 public class PanelProcesos extends JPanel {
 
@@ -76,7 +77,6 @@ public class PanelProcesos extends JPanel {
         tablaProcesos.setFillsViewportHeight(true);
         tablaProcesos.getTableHeader().setFont(Paleta.FUENTE_LABEL_BOLD);
 
-        // Renderer: colores por estado
         tablaProcesos.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
@@ -88,7 +88,6 @@ public class PanelProcesos extends JPanel {
                     return c;
                 }
 
-                // La columna 1 es el estado: colorear segun el valor
                 if (column == 1) {
                     String estado = value != null ? value.toString() : "";
                     c.setBackground(colorPorEstado(estado));
@@ -217,23 +216,84 @@ public class PanelProcesos extends JPanel {
     /* ==================== ACTUALIZACION ==================== */
 
     /**
-     * Actualiza la tabla de procesos con la lista de trabajos dada.
+     * Actualiza la tabla con TODOS los procesos:
+     *   - El proceso actual (RUNNING o BLOCKED).
+     *   - Los de la lista de trabajos (READY).
+     *   - Los bloqueados (BLOCKED).
+     *   - Los terminados (EXIT) — ya son BCPTerminado, no BCP.
+     *   - Los que estan en espera (READY_SUSPEND).
+     *
+     * Evita duplicados usando un Set de IDs.
      */
-    public void actualizarLista(ListaDeTrabajos lista) {
+    public void actualizarLista(ListaDeTrabajos lista,
+                                BCP procesoActual,
+                                List<BCP> procesosBloqueados,
+                                List<BCPTerminado> procesosTerminados,
+                                List<ProcesoEnEspera> procesosEnEspera) {
         modeloProcesos.setRowCount(0);
-        if (lista == null) return;
+        Set<Integer> idsAgregados = new HashSet<>();
 
-        for (BCP bcp : lista.toList()) {
+        // 1. Proceso actual
+        if (procesoActual != null) {
             modeloProcesos.addRow(new Object[]{
-                "ID " + bcp.getId(),
-                bcp.getEstado().toString()
+                "ID " + procesoActual.getId(),
+                procesoActual.getEstado().toString()
             });
+            idsAgregados.add(procesoActual.getId());
+        }
+
+        // 2. Lista de trabajos (READY)
+        if (lista != null) {
+            for (BCP bcp : lista.toList()) {
+                if (idsAgregados.add(bcp.getId())) {
+                    modeloProcesos.addRow(new Object[]{
+                        "ID " + bcp.getId(),
+                        bcp.getEstado().toString()
+                    });
+                }
+            }
+        }
+
+        // 3. Procesos bloqueados
+        if (procesosBloqueados != null) {
+            for (BCP bcp : procesosBloqueados) {
+                if (idsAgregados.add(bcp.getId())) {
+                    modeloProcesos.addRow(new Object[]{
+                        "ID " + bcp.getId(),
+                        bcp.getEstado().toString()
+                    });
+                }
+            }
+        }
+
+        // 4. Procesos terminados (BCPTerminado, no BCP)
+        if (procesosTerminados != null) {
+            for (BCPTerminado pt : procesosTerminados) {
+                if (idsAgregados.add(pt.getId())) {
+                    modeloProcesos.addRow(new Object[]{
+                        "ID " + pt.getId(),
+                        pt.getEstado().toString()
+                    });
+                }
+            }
+        }
+
+        // 5. Procesos en espera (READY_SUSPEND)
+        if (procesosEnEspera != null) {
+            for (ProcesoEnEspera pe : procesosEnEspera) {
+                BCP bcp = pe.getBcp();
+                if (idsAgregados.add(bcp.getId())) {
+                    modeloProcesos.addRow(new Object[]{
+                        "ID " + bcp.getId(),
+                        bcp.getEstado().toString()
+                    });
+                }
+            }
         }
     }
 
     /**
      * Actualiza el panel BCP actual con los datos del BCP dado.
-     * Si bcp es null, muestra guiones.
      */
     public void actualizarBCP(BCP bcp) {
         if (bcp == null) {

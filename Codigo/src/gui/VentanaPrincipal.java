@@ -4,6 +4,7 @@ import logica.GestorProcesos;
 import logica.ListaDeTrabajos;
 import logica.ParticionadorFijo;
 import logica.ResultadoCarga;
+import logica.BCPTerminado;
 import modelo.BCP;
 import modelo.CPU;
 import modelo.Memoria;
@@ -33,23 +34,25 @@ import java.util.List;
 /**
  * Ventana principal del simulador (Proyecto 1).
  *
- * Responsabilidades:
- *   1. Construir y mostrar la interfaz completa.
- *   2. Cargar archivos .asm y crear procesos.
- *   3. Ejecutar en modo paso a paso o automatico.
- *   4. Mostrar el estado del sistema en tiempo real.
+ * La configuracion de memoria (tamano total y limite kernel) se guarda
+ * en campos de instancia para que "Limpiar" NO la resetee.
  *
- * Las barras de uso de memoria y disco estan integradas dentro de
- * sus respectivos paneles (PanelMemoria y PanelDisco).
+ * La unica forma de cambiar la configuracion es a traves del boton
+ * "Configurar", que abre VentanaConfiguracionMemoria.
  */
 public class VentanaPrincipal extends JFrame {
 
     /* ==================== CONFIGURACION ==================== */
 
     private static final int TAMANO_MEMORIA_DEFAULT = 256;
-    private static final int LIMITE_KERNEL_DEFAULT = 32;
+    private static final int LIMITE_KERNEL_DEFAULT = (int) Math.ceil(TAMANO_MEMORIA_DEFAULT * 0.20);
     private static final int MAX_PROCESOS_DEFAULT = 5;
     private static final int TAMANO_DISCO_DEFAULT = 512;
+
+    /* ==================== CONFIGURACION ACTUAL (persistente) ==================== */
+
+    private int tamanoMemoriaActual = TAMANO_MEMORIA_DEFAULT;
+    private int limiteKernelActual = LIMITE_KERNEL_DEFAULT;
 
     /* ==================== MODELO ==================== */
 
@@ -106,11 +109,11 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void inicializarSistema() {
-        memoria = new Memoria(TAMANO_MEMORIA_DEFAULT, LIMITE_KERNEL_DEFAULT);
-        cpu = new CPU(LIMITE_KERNEL_DEFAULT);
+        memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual);
+        cpu = new CPU(limiteKernelActual);
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorFijo(
-                LIMITE_KERNEL_DEFAULT,
+                limiteKernelActual,
                 memoria.getEspacioUsuarioDisponible(),
                 MAX_PROCESOS_DEFAULT);
         gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador);
@@ -139,11 +142,10 @@ public class VentanaPrincipal extends JFrame {
         centro.add(panelDisco);
         mainPanel.add(centro, BorderLayout.CENTER);
 
-        // === Sur: solo Pantalla (recursos ya no van aca) ===
+        // === Sur: Pantalla ===
         panelPantalla = new PanelPantalla();
         mainPanel.add(panelPantalla, BorderLayout.SOUTH);
 
-        // Configurar el callback de la pantalla (INT 09H)
         panelPantalla.setOnEnviar(valor -> {
             // TODO: cuando implementemos INT 09H real, desbloquear el proceso
             panelPantalla.agregarMensaje(">> Recibido: " + valor);
@@ -298,7 +300,6 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void abrirConfiguracion() {
-        // Solo permitir si no hay procesos activos
         if (gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
                     "No se puede configurar mientras hay procesos activos.\n"
@@ -309,8 +310,8 @@ public class VentanaPrincipal extends JFrame {
 
         VentanaConfiguracionMemoria dialogo = new VentanaConfiguracionMemoria(
                 this,
-                memoria.getTamanoMemoria(),
-                memoria.getLimiteKernelUsuario());
+                tamanoMemoriaActual,
+                limiteKernelActual);
 
         dialogo.setVisible(true);
 
@@ -321,7 +322,9 @@ public class VentanaPrincipal extends JFrame {
         int nuevoTamano = dialogo.getTamanoMemoria();
         int nuevoLimite = dialogo.getLimiteKernel();
 
-        // Recrear el sistema con los nuevos valores
+        this.tamanoMemoriaActual = nuevoTamano;
+        this.limiteKernelActual = nuevoLimite;
+
         memoria = new Memoria(nuevoTamano, nuevoLimite);
         cpu = new CPU(nuevoLimite);
         listaDeTrabajos = new ListaDeTrabajos();
@@ -345,12 +348,14 @@ public class VentanaPrincipal extends JFrame {
         inicializarSistema();
         indiceArchivos.clear();
         panelPantalla.limpiar();
-        panelPantalla.agregarMensaje(">> Sistema reiniciado");
+        panelPantalla.agregarMensaje(">> Sistema reiniciado (memoria: "
+                + tamanoMemoriaActual + " posiciones, kernel 0-"
+                + (limiteKernelActual - 1) + ")");
         refrescarTodo();
     }
 
     private void mostrarEstadisticas() {
-        List<BCP> terminados = gestor.getProcesosTerminados();
+        List<BCPTerminado> terminados = gestor.getProcesosTerminados();
         if (terminados.isEmpty()) {
             JOptionPane.showMessageDialog(this,
                     "No hay procesos terminados todavia.",
@@ -360,12 +365,12 @@ public class VentanaPrincipal extends JFrame {
 
         StringBuilder sb = new StringBuilder();
         sb.append("Estadisticas de procesos terminados:\n\n");
-        for (BCP bcp : terminados) {
-            sb.append("Proceso ").append(bcp.getId()).append(":\n");
-            sb.append("  Inicio:   ").append(bcp.getTiempoInicio()).append("\n");
-            sb.append("  Fin:      ").append(bcp.getTiempoFin()).append("\n");
-            sb.append("  Duracion: ").append(bcp.getDuracionSegundos()).append("s\n");
-            sb.append("  Estado:   ").append(bcp.getEstado()).append("\n\n");
+        for (BCPTerminado pt : terminados) {
+            sb.append("Proceso ").append(pt.getId()).append(":\n");
+            sb.append("  Inicio:   ").append(pt.getTiempoInicio()).append("\n");
+            sb.append("  Fin:      ").append(pt.getTiempoFin()).append("\n");
+            sb.append("  Duracion: ").append(pt.getDuracionSegundos()).append("s\n");
+            sb.append("  Estado:   ").append(pt.getEstado()).append("\n\n");
         }
 
         JOptionPane.showMessageDialog(this, sb.toString(),
@@ -375,9 +380,18 @@ public class VentanaPrincipal extends JFrame {
     /* ==================== REFRESCO ==================== */
 
     private void refrescarTodo() {
-        panelProcesos.actualizarLista(listaDeTrabajos);
-        panelProcesos.actualizarBCP(gestor.getProcesoActual());
-        panelMemoria.actualizar(memoria);
+        BCP actual = gestor.getProcesoActual();
+
+        panelProcesos.actualizarLista(
+                listaDeTrabajos,
+                actual,
+                gestor.getProcesosBloqueados(),
+                gestor.getProcesosTerminados(),
+                gestor.getProcesosEnEspera());
+        panelProcesos.actualizarBCP(actual);
+
+        int ir = (actual != null) ? actual.getIr() : -1;
+        panelMemoria.actualizar(memoria, ir);
         panelDisco.actualizar(indiceArchivos, TAMANO_DISCO_DEFAULT);
     }
 }

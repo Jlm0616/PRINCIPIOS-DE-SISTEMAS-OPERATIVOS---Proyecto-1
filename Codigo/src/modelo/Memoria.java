@@ -205,6 +205,45 @@ public class Memoria {
     public boolean cabeProgramaDeUsuario(int cantidadPosiciones) {
         return cantidadPosiciones <= getEspacioUsuarioDisponible();
     }
+  
+    /* ==================== GESTIÓN DE BLOQUES ==================== */
+
+    /**
+     * Busca un bloque de N posiciones consecutivas libres en la zona kernel.
+     *
+     * @param tamano cantidad de posiciones consecutivas necesarias
+     * @return la dirección base del bloque (primera posición), o -1 si no hay
+     */
+    public int reservarBloque(int tamano) {
+        if (tamano <= 0) {
+            throw new IllegalArgumentException("El tamaño del bloque debe ser > 0");
+        }
+        for (int inicio = 0; inicio <= limiteKernelUsuario - tamano; inicio++) {
+            boolean libre = true;
+            for (int i = 0; i < tamano; i++) {
+                if (arregloMemoria[inicio + i] != null) {
+                    libre = false;
+                    break;
+                }
+            }
+            if (libre) {
+                return inicio;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Libera un bloque de N posiciones consecutivas.
+     *
+     * @param direccionBase posición inicial del bloque
+     * @param tamano        cantidad de posiciones a liberar
+     */
+    public void liberarBloque(int direccionBase, int tamano) {
+        for (int i = 0; i < tamano; i++) {
+            arregloMemoria[direccionBase + i] = null;
+        }
+    }
 
     /* ==================== GETTERS ==================== */
 
