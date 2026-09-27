@@ -28,7 +28,8 @@ import java.util.List;
  *     de peso N tarda N pasos en completarse.
  *   - Las instrucciones son atómicas: si el peso pendiente es > 0,
  *     el proceso NO se reencola (sigue ejecutando la misma instrucción).
- *   - Cuando el peso llega a 0, el proceso se reencola al final (round-robin).
+ *   - FCFS no apropiativo: el proceso sigue ejecutando hasta terminar
+ *     o bloquearse por E/S.
  *   - Si el proceso termina (INT 20H o error), se libera su partición.
  */
 public class GestorProcesos {
@@ -115,15 +116,16 @@ public class GestorProcesos {
     *      y despacharlo.
     *   2. Ejecutar 1 segundo de CPU.
     *   3. Si el proceso terminó: liberar su partición y BCP.
-    *   4. Si aún tiene peso pendiente (instrucción a medias): NO reencolar,
-    *      sigue despachado para el próximo paso.
-    *   5. Si completó la instrucción: reencolar al final (round-robin).
+    *   4. Si el proceso sigue vivo y no bloqueado: sigue despachado,
+    *      ejecutará la siguiente instrucción en el próximo paso.
+    *   5. Si el proceso se bloquea (INT 09H): se guarda su contexto
+    *      y se libera la CPU para el siguiente.
     *
     * @return true si se ejecutó algo, false si no hay procesos
      */
     public boolean ejecutarUnPaso() {
         // 1. Si no hay proceso despachado, elegir uno
-        if (despachador.procesoActualTerminado()) {
+        if (!despachador.procesoActualOcupaCPU()) {
             // Liberar el proceso anterior si terminó
             if (despachador.getEjecutorActual() != null) {
                 BCP anterior = despachador.getEjecutorActual().getBcp();
@@ -153,20 +155,16 @@ public class GestorProcesos {
             // El proceso terminó el programa entero (EXIT ya seteado por EjecutorCPU)
             procesoTerminado(actual);
             despachador.limpiarEjecutor();
-        } else if (actual.getPesoPendiente() > 0) {
-            // Instrucción a medias: el proceso sigue RUNNING en el despachador.
-            // NO se reencola para no fragmentar la instrucción (son atómicas).
+        } else if (actual.getEstado() == EstadoProceso.BLOCKED) {
+            // FCFS no apropiativo: el proceso se bloqueó esperando E/S
+            // (por ejemplo, INT 09H esperando input del teclado).
+            // Se guarda su contexto y se libera la CPU para el siguiente.
             despachador.guardarContexto(actual);
-            // (no se cambia el estado, sigue RUNNING)
-        } else {
-            // Instrucción completada: el proceso vuelve al final de la cola (round-robin).
-            despachador.guardarContexto(actual);
-            actual.setEstado(EstadoProceso.READY);
             actual.setCpuAsignado(-1);
-            listaDeTrabajos.agregar(actual);
             despachador.limpiarEjecutor();
+            // (el proceso queda en BLOCKED; no se reencola todavía)
         }
-
+        
         return true;
     }
 
@@ -220,15 +218,28 @@ public class GestorProcesos {
 
     /** @return true si hay procesos en la cola o en ejecución. */
     public boolean hayProcesosActivos() {
-        return !listaDeTrabajos.estaVacia() || !despachador.procesoActualTerminado();
+        return !listaDeTrabajos.estaVacia() || despachador.procesoActualOcupaCPU();
     }
 
-    /** @return el BCP del proceso en ejecución, o null si no hay ninguno. */
+    /**
+     * @return el BCP del proceso que "representa" el estado actual:
+     *         - Si hay uno en ejecucion, ese.
+     *         - Si no, el primero de la lista de trabajos (el proximo a ejecutar).
+     *         - Si no hay ninguno, null.
+     */
     public BCP getProcesoActual() {
-        if (despachador.getEjecutorActual() == null) {
-            return null;
+        // 1. Si hay uno en ejecucion, devolverlo
+        if (despachador.getEjecutorActual() != null) {
+            return despachador.getEjecutorActual().getBcp();
         }
-        return despachador.getEjecutorActual().getBcp();
+
+        // 2. Si no, devolver el primero de la lista
+        if (!listaDeTrabajos.estaVacia()) {
+            return listaDeTrabajos.verPrimero();
+        }
+
+        // 3. Nada
+        return null;
     }
 
     /** @return la lista de trabajos (para mostrar en la GUI). */

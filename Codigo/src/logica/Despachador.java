@@ -77,7 +77,9 @@ public class Despachador {
             return false;
         }
         ejecutorActual.ejecutarSegundoDeCPU();
-        return !ejecutorActual.isProgramaTerminado();
+        // Devuelve true si sigue vivo Y no bloqueado
+        return !ejecutorActual.isProgramaTerminado()
+            && ejecutorActual.getBcp().getEstado() != EstadoProceso.BLOCKED;
     }
     
     /**
@@ -95,8 +97,17 @@ public class Despachador {
     }
 
     /** @return true si el proceso actual ya terminó. */
-    public boolean procesoActualTerminado() {
-        return ejecutorActual == null || ejecutorActual.isProgramaTerminado();
+    public boolean procesoActualOcupaCPU() {
+        if (ejecutorActual == null) {
+            return false;   // no hay proceso → no ocupa CPU
+        }
+        if (ejecutorActual.isProgramaTerminado()) {
+            return false;   // terminó → no ocupa CPU
+        }
+        if (ejecutorActual.getBcp().getEstado() == EstadoProceso.BLOCKED) {
+            return false;   // bloqueado → no ocupa CPU
+        }
+        return true;        // sigue vivo y no bloqueado → SÍ ocupa CPU
     }
     
     /**

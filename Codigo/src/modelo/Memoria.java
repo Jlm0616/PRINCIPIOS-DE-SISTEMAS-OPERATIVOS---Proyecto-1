@@ -22,10 +22,10 @@ public class Memoria {
     public static final int TAMANO_MINIMO = 128;
 
     /** Cantidad máxima de BCPs (5 procesos según el enunciado). */
-    public static final int MAX_BCPS = 5;                              // ← NUEVO
+    public static final int MAX_BCPS = 5;                              
 
     /** Primera posición del kernel reservada para BCPs. */
-    private static final int INICIO_ZONA_BCPS = 0;                     // ← NUEVO
+    private static final int INICIO_ZONA_BCPS = 0;                     
 
     private int tamanoMemoria;         // cantidad total de posiciones
     private int limiteKernelUsuario;   // primera posición de la zona usuario
@@ -79,7 +79,7 @@ public class Memoria {
         return arregloMemoria[posicionMemoria];
     }
 
-    /* ==================== LECTURA TIPADA ==================== */   // ← NUEVO
+    /* ==================== LECTURA TIPADA ==================== */   
 
     /**
      * Lee una posición como Instruccion (con casting seguro).
