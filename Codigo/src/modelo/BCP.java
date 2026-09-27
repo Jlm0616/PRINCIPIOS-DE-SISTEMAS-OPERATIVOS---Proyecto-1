@@ -113,6 +113,89 @@ public class BCP {
         memoria.escribir(direccionBase + offset, valor);
     }
 
+    /* ============ EXTRACCIÓN / RESTAURACIÓN (para swap) ============ */
+
+    /**
+     * Extrae los 22 valores del BCP como un arreglo de Object.
+     *
+     * Se usa al suspender un proceso: los valores se guardan en el
+     * ProcesoEnEspera (dentro del swap), y el bloque del BCP se libera
+     * del kernel. Esto respeta el modelo de Stallings (sección 3.3):
+     * el BCP es parte del process image y se mueve COMPLETO a swap.
+     *
+     * El orden del arreglo corresponde a los offsets:
+     *   [0]=ID, [1]=Estado, [2]=Prioridad, ..., [21]=Dirección.
+     *
+     * @return Object[] con los 22 valores del BCP
+     */
+    public Object[] extraerValores() {
+        Object[] valores = new Object[POSICIONES_REQUERIDAS];
+        for (int i = 0; i < POSICIONES_REQUERIDAS; i++) {
+            valores[i] = leer(i);
+        }
+        return valores;
+    }
+
+    /**
+     * Restaura los 22 valores del BCP desde un arreglo de Object.
+     *
+     * Se usa al reactivar un proceso suspendido: se reserva un bloque
+     * nuevo en kernel y se escriben en él los valores guardados en el
+     * swap.
+     *
+     * @param valores Object[] con exactamente 22 valores
+     * @throws IllegalArgumentException si el arreglo es null o no tiene
+     *         POSICIONES_REQUERIDAS elementos
+     */
+    public void restaurarValores(Object[] valores) {
+        if (valores == null || valores.length != POSICIONES_REQUERIDAS) {
+            throw new IllegalArgumentException(
+                "El arreglo debe tener exactamente " + POSICIONES_REQUERIDAS + " valores");
+        }
+        for (int i = 0; i < POSICIONES_REQUERIDAS; i++) {
+            escribir(i, valores[i]);
+        }
+    }
+
+    /**
+     * Crea un arreglo con los valores iniciales de un BCP que se
+     * suspende directamente (sin haber estado nunca en kernel).
+     *
+     * Se usa cuando un proceso recién cargado no cabe en memoria
+     * principal y se manda directamente al swap en estado READY_SUSPEND.
+     *
+     * @param id        identificador del proceso
+     * @param prioridad prioridad del proceso
+     * @param alcance   cantidad de instrucciones del proceso
+     * @return Object[] con 22 valores iniciales
+     */
+    public static Object[] valoresIniciales(int id, int prioridad, int alcance) {
+        Object[] valores = new Object[POSICIONES_REQUERIDAS];
+        valores[OFF_ID]             = id;
+        valores[OFF_ESTADO]         = EstadoProceso.READY_SUSPEND;
+        valores[OFF_PRIORIDAD]      = prioridad;
+        valores[OFF_PC]             = 0;
+        valores[OFF_IR]             = 0;
+        valores[OFF_AC]             = 0;
+        valores[OFF_AX]             = 0;
+        valores[OFF_BX]             = 0;
+        valores[OFF_CX]             = 0;
+        valores[OFF_DX]             = 0;
+        valores[OFF_OVERFLOW]       = false;
+        valores[OFF_BANDERA_IGUAL]  = false;
+        valores[OFF_PESO_PENDIENTE] = 0;
+        valores[OFF_PILA]           = new Stack<Integer>();
+        valores[OFF_BASE]           = 0;
+        valores[OFF_ALCANCE]        = alcance;
+        valores[OFF_TIEMPO_INICIO]  = null;
+        valores[OFF_TIEMPO_FIN]     = null;
+        valores[OFF_CPU_ASIGNADO]   = -1;
+        valores[OFF_ARCHIVOS]       = new ArrayList<String>();
+        valores[OFF_SIGUIENTE_BCP]  = -1;
+        valores[OFF_DIRECCION]      = -1;
+        return valores;
+    }
+
     /* ============ SINCRONIZACIÓN CON CPU ============ */
 
     public void actualizarDesdeCPU(CPU cpu) {

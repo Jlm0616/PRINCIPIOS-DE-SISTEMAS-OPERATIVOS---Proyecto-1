@@ -191,7 +191,7 @@ public class Interrupciones {
             }
         }
 
-        return ResultadoInterrupcion.RUNNING;
+        return ResultadoInterrupcion.BLOQUEADO;
     }
 
     /* ==================== CONFIGURACION DE CALLBACKS ==================== */

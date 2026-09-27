@@ -215,16 +215,6 @@ public class PanelProcesos extends JPanel {
 
     /* ==================== ACTUALIZACION ==================== */
 
-    /**
-     * Actualiza la tabla con TODOS los procesos:
-     *   - El proceso actual (RUNNING o BLOCKED).
-     *   - Los de la lista de trabajos (READY).
-     *   - Los bloqueados (BLOCKED).
-     *   - Los terminados (EXIT) — ya son BCPTerminado, no BCP.
-     *   - Los que estan en espera (READY_SUSPEND).
-     *
-     * Evita duplicados usando un Set de IDs.
-     */
     public void actualizarLista(ListaDeTrabajos lista,
                                 BCP procesoActual,
                                 List<BCP> procesosBloqueados,
@@ -278,23 +268,19 @@ public class PanelProcesos extends JPanel {
             }
         }
 
-        // 5. Procesos en espera (READY_SUSPEND)
+        // 5. Procesos en espera (READY_SUSPEND)   ← CORREGIDO
         if (procesosEnEspera != null) {
             for (ProcesoEnEspera pe : procesosEnEspera) {
-                BCP bcp = pe.getBcp();
-                if (idsAgregados.add(bcp.getId())) {
+                if (idsAgregados.add(pe.getId())) {
                     modeloProcesos.addRow(new Object[]{
-                        "ID " + bcp.getId(),
-                        bcp.getEstado().toString()
+                        "ID " + pe.getId(),
+                        pe.getEstado().toString()
                     });
                 }
             }
         }
     }
 
-    /**
-     * Actualiza el panel BCP actual con los datos del BCP dado.
-     */
     public void actualizarBCP(BCP bcp) {
         if (bcp == null) {
             lblId.setText("ID: -");
