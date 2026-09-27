@@ -53,6 +53,8 @@ public class VentanaPrincipal extends JFrame {
 
     private int tamanoMemoriaActual = TAMANO_MEMORIA_DEFAULT;
     private int limiteKernelActual = LIMITE_KERNEL_DEFAULT;
+    
+    private int tamanoDiscoActual = TAMANO_DISCO_DEFAULT;
 
     /* ==================== MODELO ==================== */
 
@@ -344,22 +346,25 @@ public class VentanaPrincipal extends JFrame {
             return;
         }
 
-        VentanaConfiguracionMemoria dialogo = new VentanaConfiguracionMemoria(
-                this,
-                tamanoMemoriaActual,
-                limiteKernelActual);
+    VentanaConfiguracion dialogo = new VentanaConfiguracion(
+            this,
+            tamanoMemoriaActual,
+            limiteKernelActual,
+            tamanoDiscoActual);   // ← podés agregar tamanoDiscoActual persistente
 
-        dialogo.setVisible(true);
+    dialogo.setVisible(true);
 
-        if (!dialogo.isConfirmado()) {
-            return;
-        }
+    if (!dialogo.isConfirmado()) {
+        return;
+    }
 
-        int nuevoTamano = dialogo.getTamanoMemoria();
-        int nuevoLimite = dialogo.getLimiteKernel();
+    int nuevoTamano = dialogo.getTamanoMemoria();
+    int nuevoLimite = dialogo.getLimiteKernel();
+    int nuevoDisco = dialogo.getTamanoDisco();
 
         this.tamanoMemoriaActual = nuevoTamano;
         this.limiteKernelActual = nuevoLimite;
+        this.tamanoDiscoActual = dialogo.getTamanoDisco(); 
 
         memoria = new Memoria(nuevoTamano, nuevoLimite);
         cpu = new CPU(nuevoLimite);
@@ -373,10 +378,11 @@ public class VentanaPrincipal extends JFrame {
         indiceArchivos.clear();
 
         panelPantalla.limpiar();
-        panelPantalla.agregarMensaje(">> Configuracion aplicada: "
-                + nuevoTamano + " posiciones, kernel 0-"
-                + (nuevoLimite - 1) + ", usuario "
-                + nuevoLimite + "-" + (nuevoTamano - 1));
+        panelPantalla.agregarMensaje(">> Configuracion aplicada:");
+        panelPantalla.agregarMensaje(">>   Memoria: " + nuevoTamano + " posiciones");
+        panelPantalla.agregarMensaje(">>   Kernel: 0-" + (nuevoLimite - 1)
+                + ", Usuario: " + nuevoLimite + "-" + (nuevoTamano - 1));
+        panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual + " posiciones");
 
         refrescarTodo();
     }
@@ -430,6 +436,6 @@ public class VentanaPrincipal extends JFrame {
 
         int ir = (actual != null) ? actual.getIr() : -1;
         panelMemoria.actualizar(memoria, ir);
-        panelDisco.actualizar(indiceArchivos, TAMANO_DISCO_DEFAULT);
+        panelDisco.actualizar(indiceArchivos, tamanoDiscoActual);
     }
 }
