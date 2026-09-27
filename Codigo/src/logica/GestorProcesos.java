@@ -122,11 +122,12 @@ public class GestorProcesos {
 
         boolean sigueVivo = despachador.ejecutarUnPaso();
         BCP actual = despachador.getEjecutorActual().getBcp();
+        EstadoProceso estado = actual.getEstado();
 
-        if (!sigueVivo) {
+        if (estado == EstadoProceso.EXIT) {
             procesoTerminado(actual);
             despachador.limpiarEjecutor();
-        } else if (actual.getEstado() == EstadoProceso.BLOCKED) {
+        } else if (estado == EstadoProceso.BLOCKED) {
             despachador.guardarContexto(actual);
             actual.setCpuAsignado(-1);
             despachador.limpiarEjecutor();
@@ -226,6 +227,37 @@ public class GestorProcesos {
 
         listaDeTrabajos.agregar(bcp);
     }
+    
+    /**
+     * Desbloquea el primer proceso en la lista de bloqueados.
+     * Se llama cuando el usuario envia un valor por la consola (INT 09H).
+     *
+     * @param valor valor ingresado (0-255)
+     * @return true si se desbloqueo algun proceso, false si no habia
+     */
+    public boolean desbloquearProceso(int valor) {
+        if (procesosBloqueados.isEmpty()) {
+            return false;
+        }
+
+        BCP bcp = procesosBloqueados.remove(0);
+
+        // Guardar el valor en DX
+        bcp.setDx(valor);
+
+        // Cambiar estado a READY
+        bcp.setEstado(EstadoProceso.READY);
+
+        // Reencolar
+        listaDeTrabajos.agregar(bcp);
+
+        return true;
+    }
+
+    /** @return true si hay procesos bloqueados esperando input. */
+    public boolean hayProcesosBloqueados() {
+        return !procesosBloqueados.isEmpty();
+    }
 
     /* ==================== CONSULTAS PARA LA GUI ==================== */
 
@@ -243,12 +275,22 @@ public class GestorProcesos {
     }
 
     public BCP getProcesoActual() {
+        // 1. Si hay proceso en ejecución, mostrarlo
         if (despachador.getEjecutorActual() != null) {
             return despachador.getEjecutorActual().getBcp();
         }
+
+        // 2. Si no, mostrar el primero de la lista de trabajos
         if (!listaDeTrabajos.estaVacia()) {
             return listaDeTrabajos.verPrimero();
         }
+
+        // 3. Si no, mostrar el primer bloqueado
+        if (!procesosBloqueados.isEmpty()) {
+            return procesosBloqueados.get(0);
+        }
+
+        // 4. Nada
         return null;
     }
 
@@ -270,5 +312,31 @@ public class GestorProcesos {
 
     public List<ProcesoEnEspera> getProcesosEnEspera() {
         return procesosEnEspera;
+    }
+    
+    /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
+
+    /**
+     * Configura el callback de salida a pantalla (INT 10H).
+     * La GUI lo usa para mostrar los mensajes en el PanelPantalla.
+     */
+    public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
+        despachador.setSalidaPantalla(callback);
+    }
+
+    /**
+     * Configura el callback de solicitud de teclado (INT 09H).
+     * La GUI lo usa para habilitar la consola.
+     */
+    public void setSolicitudTeclado(java.util.function.Consumer<BCP> callback) {
+        despachador.setSolicitudTeclado(callback);
+    }
+
+    /**
+     * Configura el callback de solicitud de archivos (INT 21H).
+     * La GUI lo usa para operaciones de disco.
+     */
+    public void setSolicitudArchivo(java.util.function.Consumer<BCP> callback) {
+        despachador.setSolicitudArchivo(callback);
     }
 }

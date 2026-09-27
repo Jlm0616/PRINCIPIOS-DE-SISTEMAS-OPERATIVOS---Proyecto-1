@@ -146,9 +146,45 @@ public class VentanaPrincipal extends JFrame {
         panelPantalla = new PanelPantalla();
         mainPanel.add(panelPantalla, BorderLayout.SOUTH);
 
+        // Configurar callbacks del gestor
+        configurarCallbacks();
+    }
+
+    /**
+     * Configura los callbacks de interrupciones del gestor.
+     *
+     * Se debe llamar cada vez que se recrea el gestor (en el constructor
+     * y en limpiar()/abrirConfiguracion()).
+     */
+    private void configurarCallbacks() {
+        // INT 10H: salida a pantalla
+        gestor.setSalidaPantalla(mensaje -> {
+            panelPantalla.agregarMensaje(mensaje);
+        });
+
+        // INT 09H: solicitud de teclado
+        gestor.setSolicitudTeclado(bcp -> {
+            panelPantalla.habilitarEntrada(true);
+            panelPantalla.agregarMensaje(">> Proceso " + bcp.getId()
+                    + " esperando input de teclado (0-255)...");
+        });
+
+        // INT 21H: solicitud de archivos
+        gestor.setSolicitudArchivo(bcp -> {
+            panelPantalla.agregarMensaje(">> Proceso " + bcp.getId()
+                    + " solicita operacion de archivo (pendiente)");
+        });
+
+        // Callback de la consola (cuando el usuario envia un valor)
         panelPantalla.setOnEnviar(valor -> {
-            // TODO: cuando implementemos INT 09H real, desbloquear el proceso
-            panelPantalla.agregarMensaje(">> Recibido: " + valor);
+            boolean desbloqueado = gestor.desbloquearProceso(valor);
+            if (desbloqueado) {
+                panelPantalla.agregarMensaje(">> Valor " + valor
+                        + " enviado al proceso desbloqueado (DX=" + valor + ")");
+                refrescarTodo();
+            } else {
+                panelPantalla.agregarMensaje(">> No hay procesos esperando input.");
+            }
         });
     }
 
@@ -333,6 +369,7 @@ public class VentanaPrincipal extends JFrame {
                 memoria.getEspacioUsuarioDisponible(),
                 MAX_PROCESOS_DEFAULT);
         gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador);
+        configurarCallbacks();
         indiceArchivos.clear();
 
         panelPantalla.limpiar();
@@ -346,6 +383,7 @@ public class VentanaPrincipal extends JFrame {
 
     private void limpiar() {
         inicializarSistema();
+        configurarCallbacks();
         indiceArchivos.clear();
         panelPantalla.limpiar();
         panelPantalla.agregarMensaje(">> Sistema reiniciado (memoria: "

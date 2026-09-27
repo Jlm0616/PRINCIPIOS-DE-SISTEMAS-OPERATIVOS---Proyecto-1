@@ -24,12 +24,16 @@ import modelo.Memoria;
  *   2. Consumir 1 segundo del peso pendiente.
  *   3. Si el peso llega a 0: ejecutar la instrucción completa
  *      (efectos + avance de PC + sincronización con BCP).
+ *
+ * Las interrupciones (INT) se delegan a la clase Interrupciones, que
+ * encapsula la logica de las llamadas al sistema.
  */
 public class EjecutorCPU {
 
     private CPU cpu;
     private Memoria memoria;
     private BCP bcp;
+    private Interrupciones interrupciones;
 
     /** Indica si el programa ya terminó (INT 20H, EXIT, o error fatal). */
     private boolean programaTerminado;
@@ -49,6 +53,7 @@ public class EjecutorCPU {
         this.cpu = cpu;
         this.memoria = memoria;
         this.bcp = bcp;
+        this.interrupciones = new Interrupciones();
         this.programaTerminado = false;
     }
 
@@ -79,8 +84,6 @@ public class EjecutorCPU {
             Instruccion instr = memoria.leerInstruccion(pc);
 
             if (instr == null) {
-                // No hay más instrucciones: el programa terminó sin INT 20H.
-                // Se marca el proceso como EXIT y se detiene limpiamente.
                 bcp.setEstado(EstadoProceso.EXIT);
                 bcp.marcarFin();
                 programaTerminado = true;
@@ -99,7 +102,7 @@ public class EjecutorCPU {
 
         // 3. ¿Se completó la instrucción?
         if (bcp.getPesoPendiente() > 0) {
-            return false;   // todavía no
+            return false;
         }
 
         // 4. Instrucción completada: ejecutar efectos
@@ -110,8 +113,6 @@ public class EjecutorCPU {
         try {
             saltoEjecutado = ejecutarOperacion(instr, pc);
         } catch (IllegalStateException e) {
-            // Desbordamiento o subdesbordamiento de pila
-            // (Tabla 3.2 del Stallings: "Bounds violation")
             bcp.setEstado(EstadoProceso.EXIT);
             bcp.marcarFin();
             programaTerminado = true;
@@ -303,36 +304,45 @@ public class EjecutorCPU {
     }
 
     /**
-     * Ejecuta una interrupción.
+     * Ejecuta una interrupción delegando a la clase Interrupciones.
+     *
+     * Según el resultado:
+     *   - RUNNING:    el proceso sigue vivo (INT 10H).
+     *   - BLOQUEADO:  el proceso se bloqueó esperando E/S (INT 09H, INT 21H).
+     *   - TERMINADO:  el proceso terminó (INT 20H).
      *
      * @param codigo código decimal de la interrupción (ej. 0x20 = 32)
      */
     private void ejecutarINT(int codigo) {
-        switch (codigo) {
-            case 0x20:  // 20H -> fin del programa
-                bcp.setEstado(EstadoProceso.EXIT);
-                bcp.marcarFin();
-                programaTerminado = true;
-                break;
+        Interrupciones.ResultadoInterrupcion resultado =
+                interrupciones.ejecutar(codigo, bcp);
 
-            case 0x10:  // 10H -> imprimir DX en pantalla
-                System.out.println("[PANTALLA] DX = " + cpu.getDX());
+        switch (resultado) {
+            case RUNNING:
+                // el proceso sigue vivo, no hacer nada
                 break;
-
-            case 0x09:  // 09H -> leer teclado (numérico 0-255)
-                // TODO: conectar con la consola de teclado de la GUI
+            case BLOQUEADO:
                 bcp.setEstado(EstadoProceso.BLOCKED);
                 break;
-
-            case 0x21:  // 21H -> manejo de archivos
-                // TODO: conectar con el almacenamiento secundario
-                System.out.println("[ARCHIVOS] pendiente de implementación");
+            case TERMINADO:
+                bcp.setEstado(EstadoProceso.EXIT);
+                programaTerminado = true;
                 break;
-
-            default:
-                throw new UnsupportedOperationException(
-                    "Interrupción no soportada: " + Integer.toHexString(codigo) + "H");
         }
+    }
+
+    /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
+
+    public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
+        interrupciones.setSalidaPantalla(callback);
+    }
+
+    public void setSolicitudTeclado(java.util.function.Consumer<BCP> callback) {
+        interrupciones.setSolicitudTeclado(callback);
+    }
+
+    public void setSolicitudArchivo(java.util.function.Consumer<BCP> callback) {
+        interrupciones.setSolicitudArchivo(callback);
     }
 
     /* ==================== HELPERS GENERALES ==================== */
