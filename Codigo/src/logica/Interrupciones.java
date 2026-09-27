@@ -1,6 +1,7 @@
 package logica;
 
 import modelo.BCP;
+import modelo.Disco;
 
 import java.util.function.Consumer;
 
@@ -26,6 +27,9 @@ import java.util.function.Consumer;
  */
 public class Interrupciones {
 
+    /** Disco simulado donde se almacenan los archivos. */
+    private final Disco disco;
+
     /* ==================== CALLBACKS ==================== */
 
     /** Se invoca cuando hay salida a pantalla (INT 10H). */
@@ -39,8 +43,13 @@ public class Interrupciones {
 
     /* ==================== CONSTRUCTOR ==================== */
 
-    public Interrupciones() {
-        // sin estado propio: los callbacks se configuran despues
+    /**
+     * Crea el manejador de interrupciones asociado a un disco.
+     *
+     * @param disco disco simulado para las operaciones de archivo
+     */
+    public Interrupciones(Disco disco) {
+        this.disco = disco;
     }
 
     /* ==================== EJECUCION ==================== */
@@ -105,63 +114,105 @@ public class Interrupciones {
 
     /**
      * INT 21H: manejo de archivos.
-     * AH indica la operacion (crear, abrir, leer, escribir, eliminar).
-     * DX contiene el nombre del archivo.
-     * AL contiene el resultado.
-     * El proceso se bloquea mientras se realiza la operacion.
+     *
+     * AH indica la operacion:
+     *   3Ch -> crear archivo
+     *   3Dh -> abrir archivo
+     *   4Dh -> leer archivo
+     *   40h -> escribir archivo
+     *   41h -> eliminar archivo
+     *
+     * DX contiene un numero que se usa para construir el nombre del archivo
+     * (formato: "archivo_<DX>").
+     *
+     * AL contiene el resultado:
+     *   - 0 si la operacion fue exitosa
+     *   - 1 si hubo error
+     *   - El contenido leido (para AH=4Dh)
+     *
+     * El proceso continua en RUNNING porque la operacion se realiza
+     * inmediatamente (no hay espera de E/S real).
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
             solicitudArchivo.accept(bcp);
         }
-        return ResultadoInterrupcion.BLOQUEADO;
+
+        int ah = bcp.getAh();
+        int dx = bcp.getDx();
+        String nombre = "archivo_" + dx;
+
+        switch (ah) {
+            case 0x3C: {  // crear archivo
+                boolean creado = disco.crear(nombre);
+                bcp.setAl(creado ? 0 : 1);
+                System.out.println("[DISCO] crear(" + nombre + ") = " + creado);
+                break;
+            }
+
+            case 0x3D: {  // abrir archivo
+                boolean existe = disco.existe(nombre);
+                bcp.setAl(existe ? 0 : 1);
+                System.out.println("[DISCO] abrir(" + nombre + ") = " + existe);
+                break;
+            }
+
+            case 0x4D: {  // leer archivo
+                String contenido = disco.leer(nombre);
+                if (contenido != null && !contenido.isEmpty()) {
+                    bcp.setAl(contenido.charAt(0));
+                } else {
+                    bcp.setAl(0);
+                }
+                System.out.println("[DISCO] leer(" + nombre + ") = " + contenido);
+                break;
+            }
+
+            case 0x40: {  // escribir archivo
+                int al = bcp.getAl();
+                String aEscribir = String.valueOf((char) al);
+                boolean escrito = disco.escribir(nombre, aEscribir);
+                bcp.setAl(escrito ? 0 : 1);
+                System.out.println("[DISCO] escribir(" + nombre + ", " + aEscribir + ")");
+                break;
+            }
+
+            case 0x41: {  // eliminar archivo
+                boolean eliminado = disco.eliminar(nombre);
+                bcp.setAl(eliminado ? 0 : 1);
+                System.out.println("[DISCO] eliminar(" + nombre + ") = " + eliminado);
+                break;
+            }
+
+            default: {
+                bcp.setAl(0xFF);   // operacion desconocida
+                System.out.println("[DISCO] operacion desconocida: AH=" + Integer.toHexString(ah));
+                break;
+            }
+        }
+
+        return ResultadoInterrupcion.RUNNING;
     }
 
     /* ==================== CONFIGURACION DE CALLBACKS ==================== */
 
-    /**
-     * Configura el callback que se invoca en INT 10H.
-     *
-     * @param callback recibe el mensaje a mostrar en pantalla
-     */
     public void setSalidaPantalla(Consumer<String> callback) {
         this.salidaPantalla = callback;
     }
 
-    /**
-     * Configura el callback que se invoca en INT 09H.
-     *
-     * @param callback recibe el BCP del proceso que pide el valor
-     */
     public void setSolicitudTeclado(Consumer<BCP> callback) {
         this.solicitudTeclado = callback;
     }
 
-    /**
-     * Configura el callback que se invoca en INT 21H.
-     *
-     * @param callback recibe el BCP del proceso que pide la operacion
-     */
     public void setSolicitudArchivo(Consumer<BCP> callback) {
         this.solicitudArchivo = callback;
     }
 
     /* ==================== RESULTADO ==================== */
 
-    /**
-     * Resultado de ejecutar una interrupcion.
-     *
-     * Indica al EjecutorCPU como debe continuar la ejecucion del proceso.
-     */
     public enum ResultadoInterrupcion {
-
-        /** El proceso sigue vivo y puede continuar ejecutando (INT 10H). */
         RUNNING,
-
-        /** El proceso se bloqueo esperando E/S (INT 09H, INT 21H). */
         BLOQUEADO,
-
-        /** El proceso termino su ejecucion (INT 20H). */
         TERMINADO
     }
-} 
+}

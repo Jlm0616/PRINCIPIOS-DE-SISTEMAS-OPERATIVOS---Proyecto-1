@@ -1,5 +1,7 @@
 package gui;
 
+import modelo.Disco;
+
 import javax.swing.JPanel;
 import javax.swing.JTable;
 import javax.swing.JScrollPane;
@@ -22,7 +24,7 @@ import java.util.List;
 /**
  * Panel que muestra el contenido del disco.
  *
- * Arriba: barra de progreso con el porcentaje de uso.
+ * Arriba: barra de progreso con el porcentaje de uso del indice.
  * Centro: tabla con el indice de archivos.
  * Abajo: boton toggle "Mostrar solo ocupadas / Mostrar todas".
  */
@@ -70,7 +72,7 @@ public class PanelDisco extends JPanel {
         barraUso.setValue(0);
         barraUso.setString("0%");
 
-        lblUso = new JLabel("0 / 0 posiciones usadas");
+        lblUso = new JLabel("0 / 0 archivos");
         lblUso.setFont(Paleta.FUENTE_LABEL);
         lblUso.setForeground(Paleta.TEXTO_NORMAL);
 
@@ -160,9 +162,10 @@ public class PanelDisco extends JPanel {
 
     private void actualizarBarra() {
         int usadas = (entradas != null) ? entradas.size() : 0;
-        int porcentaje = (tamanoTotal > 0) ? (usadas * 100) / tamanoTotal : 0;
+        int maxArchivos = Disco.MAX_ARCHIVOS;
+        int porcentaje = (maxArchivos > 0) ? (usadas * 100) / maxArchivos : 0;
         barraUso.setValue(porcentaje);
         barraUso.setString(porcentaje + "%");
-        lblUso.setText(usadas + " / " + tamanoTotal + " posiciones usadas");
+        lblUso.setText(usadas + " / " + maxArchivos + " archivos");
     }
 }

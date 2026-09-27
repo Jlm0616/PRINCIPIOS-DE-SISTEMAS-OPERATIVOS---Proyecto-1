@@ -8,6 +8,7 @@ import logica.BCPTerminado;
 import modelo.BCP;
 import modelo.CPU;
 import modelo.Memoria;
+import modelo.Disco;
 
 import javax.swing.JFrame;
 import javax.swing.JPanel;
@@ -31,49 +32,28 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Ventana principal del simulador (Proyecto 1).
- *
- * La configuracion de memoria (tamano total y limite kernel) se guarda
- * en campos de instancia para que "Limpiar" NO la resetee.
- *
- * La unica forma de cambiar la configuracion es a traves del boton
- * "Configurar", que abre VentanaConfiguracionMemoria.
- */
 public class VentanaPrincipal extends JFrame {
-
-    /* ==================== CONFIGURACION ==================== */
 
     private static final int TAMANO_MEMORIA_DEFAULT = 256;
     private static final int LIMITE_KERNEL_DEFAULT = (int) Math.ceil(TAMANO_MEMORIA_DEFAULT * 0.20);
     private static final int MAX_PROCESOS_DEFAULT = 5;
     private static final int TAMANO_DISCO_DEFAULT = 512;
 
-    /* ==================== CONFIGURACION ACTUAL (persistente) ==================== */
-
     private int tamanoMemoriaActual = TAMANO_MEMORIA_DEFAULT;
     private int limiteKernelActual = LIMITE_KERNEL_DEFAULT;
-    
     private int tamanoDiscoActual = TAMANO_DISCO_DEFAULT;
-
-    /* ==================== MODELO ==================== */
 
     private Memoria memoria;
     private CPU cpu;
     private ListaDeTrabajos listaDeTrabajos;
     private ParticionadorFijo particionador;
     private GestorProcesos gestor;
-
-    private List<String[]> indiceArchivos;
-
-    /* ==================== PANELES ==================== */
+    private Disco disco;
 
     private PanelProcesos panelProcesos;
     private PanelMemoria panelMemoria;
     private PanelDisco panelDisco;
     private PanelPantalla panelPantalla;
-
-    /* ==================== BOTONES ==================== */
 
     private JButton btnCargar;
     private JButton btnEjecutar;
@@ -81,8 +61,6 @@ public class VentanaPrincipal extends JFrame {
     private JButton btnConfigurar;
     private JButton btnLimpiar;
     private JButton btnEstadisticas;
-
-    /* ==================== CONSTRUCTOR ==================== */
 
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
@@ -113,13 +91,13 @@ public class VentanaPrincipal extends JFrame {
     private void inicializarSistema() {
         memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual);
         cpu = new CPU(limiteKernelActual);
+        disco = new Disco(tamanoDiscoActual);
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorFijo(
                 limiteKernelActual,
                 memoria.getEspacioUsuarioDisponible(),
                 MAX_PROCESOS_DEFAULT);
-        gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador);
-        indiceArchivos = new ArrayList<>();
+        gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador, disco);
     }
 
     private void inicializarComponentes() {
@@ -128,10 +106,8 @@ public class VentanaPrincipal extends JFrame {
         mainPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
         setContentPane(mainPanel);
 
-        // === Encabezado: titulo + botones ===
         mainPanel.add(crearEncabezado(), BorderLayout.NORTH);
 
-        // === Centro: Procesos | Memoria | Disco ===
         JPanel centro = new JPanel(new GridLayout(1, 3, 10, 10));
         centro.setOpaque(false);
 
@@ -144,40 +120,36 @@ public class VentanaPrincipal extends JFrame {
         centro.add(panelDisco);
         mainPanel.add(centro, BorderLayout.CENTER);
 
-        // === Sur: Pantalla ===
         panelPantalla = new PanelPantalla();
         mainPanel.add(panelPantalla, BorderLayout.SOUTH);
 
-        // Configurar callbacks del gestor
         configurarCallbacks();
     }
 
-    /**
-     * Configura los callbacks de interrupciones del gestor.
-     *
-     * Se debe llamar cada vez que se recrea el gestor (en el constructor
-     * y en limpiar()/abrirConfiguracion()).
-     */
     private void configurarCallbacks() {
-        // INT 10H: salida a pantalla
-        gestor.setSalidaPantalla(mensaje -> {
-            panelPantalla.agregarMensaje(mensaje);
-        });
+        gestor.setSalidaPantalla(mensaje -> panelPantalla.agregarMensaje(mensaje));
 
-        // INT 09H: solicitud de teclado
         gestor.setSolicitudTeclado(bcp -> {
             panelPantalla.habilitarEntrada(true);
             panelPantalla.agregarMensaje(">> Proceso " + bcp.getId()
                     + " esperando input de teclado (0-255)...");
         });
 
-        // INT 21H: solicitud de archivos
         gestor.setSolicitudArchivo(bcp -> {
-            panelPantalla.agregarMensaje(">> Proceso " + bcp.getId()
-                    + " solicita operacion de archivo (pendiente)");
+            int ah = bcp.getAh();
+            String operacion;
+            switch (ah) {
+                case 0x3C: operacion = "crear"; break;
+                case 0x3D: operacion = "abrir"; break;
+                case 0x4D: operacion = "leer"; break;
+                case 0x40: operacion = "escribir"; break;
+                case 0x41: operacion = "eliminar"; break;
+                default:   operacion = "desconocida"; break;
+            }
+            panelPantalla.agregarMensaje(">> [DISCO] Proceso " + bcp.getId()
+                    + " -> " + operacion + " archivo_" + bcp.getDx());
         });
 
-        // Callback de la consola (cuando el usuario envia un valor)
         panelPantalla.setOnEnviar(valor -> {
             boolean desbloqueado = gestor.desbloquearProceso(valor);
             if (desbloqueado) {
@@ -194,7 +166,6 @@ public class VentanaPrincipal extends JFrame {
         JPanel encabezado = new JPanel(new BorderLayout());
         encabezado.setOpaque(false);
 
-        // --- Titulo ---
         JPanel panelTitulo = new JPanel(new BorderLayout());
         panelTitulo.setBackground(Paleta.FONDO_TITULO);
         panelTitulo.setBorder(new EmptyBorder(12, 20, 12, 20));
@@ -206,7 +177,6 @@ public class VentanaPrincipal extends JFrame {
 
         encabezado.add(panelTitulo, BorderLayout.NORTH);
 
-        // --- Botones ---
         JPanel panelBotones = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
         panelBotones.setBackground(Paleta.FONDO_PANEL);
         panelBotones.setBorder(BorderFactory.createMatteBorder(0, 0, 3, 0, Paleta.VERDE_OSCURO));
@@ -233,7 +203,6 @@ public class VentanaPrincipal extends JFrame {
         btnEstadisticas.addActionListener(e -> mostrarEstadisticas());
 
         encabezado.add(panelBotones, BorderLayout.SOUTH);
-
         return encabezado;
     }
 
@@ -251,8 +220,6 @@ public class VentanaPrincipal extends JFrame {
         return boton;
     }
 
-    /* ==================== ACCIONES ==================== */
-
     private void cargarArchivo() {
         FileDialog fileDialog = new FileDialog(this, "Seleccionar archivo ASM", FileDialog.LOAD);
         fileDialog.setSize(900, 650);
@@ -265,9 +232,7 @@ public class VentanaPrincipal extends JFrame {
         String directorio = fileDialog.getDirectory();
         String archivoSeleccionado = fileDialog.getFile();
 
-        if (archivoSeleccionado == null || directorio == null) {
-            return;
-        }
+        if (archivoSeleccionado == null || directorio == null) return;
 
         File archivo = new File(directorio, archivoSeleccionado);
 
@@ -284,18 +249,22 @@ public class VentanaPrincipal extends JFrame {
             case EXITO:
                 panelPantalla.agregarMensaje(">> Cargado: " + archivo.getName()
                         + " (ID=" + resultado.getBcp().getId() + ")");
-                indiceArchivos.add(new String[]{
-                    archivo.getName(),
-                    "dir " + resultado.getBcp().getBase()
-                });
-                break;
 
+                // Guardar el .asm en el disco
+                try {
+                    String contenidoAsm = new String(
+                            java.nio.file.Files.readAllBytes(archivo.toPath()));
+                    disco.guardar(archivo.getName(), contenidoAsm);
+                } catch (Exception ex) {
+                    panelPantalla.agregarMensaje(">> [ADVERTENCIA] No se pudo guardar el .asm: "
+                            + ex.getMessage());
+                }
+                break;
             case ERROR:
                 JOptionPane.showMessageDialog(this,
                         "Error al cargar:\n" + resultado.getMensajeError(),
                         "Archivo invalido", JOptionPane.ERROR_MESSAGE);
                 return;
-
             case EN_ESPERA:
                 panelPantalla.agregarMensaje(">> " + archivo.getName()
                         + " en espera (no hay particion libre)");
@@ -311,11 +280,7 @@ public class VentanaPrincipal extends JFrame {
                     "No hay procesos para ejecutar.\nCarga un archivo .asm primero.");
             return;
         }
-
-        boolean ejecutado = gestor.ejecutarUnPaso();
-        if (ejecutado) {
-            refrescarTodo();
-        }
+        if (gestor.ejecutarUnPaso()) refrescarTodo();
     }
 
     private void ejecutarAutomatico() {
@@ -324,7 +289,6 @@ public class VentanaPrincipal extends JFrame {
                     "No hay procesos para ejecutar.\nCarga un archivo .asm primero.");
             return;
         }
-
         try {
             int pasos = gestor.ejecutarAutomatico();
             panelPantalla.agregarMensaje(">> Ejecucion automatica completada ("
@@ -346,43 +310,42 @@ public class VentanaPrincipal extends JFrame {
             return;
         }
 
-    VentanaConfiguracion dialogo = new VentanaConfiguracion(
-            this,
-            tamanoMemoriaActual,
-            limiteKernelActual,
-            tamanoDiscoActual);   // ← podés agregar tamanoDiscoActual persistente
+        VentanaConfiguracion dialogo = new VentanaConfiguracion(
+                this,
+                tamanoMemoriaActual,
+                limiteKernelActual,
+                tamanoDiscoActual);
 
-    dialogo.setVisible(true);
+        dialogo.setVisible(true);
 
-    if (!dialogo.isConfirmado()) {
-        return;
-    }
+        if (!dialogo.isConfirmado()) return;
 
-    int nuevoTamano = dialogo.getTamanoMemoria();
-    int nuevoLimite = dialogo.getLimiteKernel();
-    int nuevoDisco = dialogo.getTamanoDisco();
+        int nuevoTamano = dialogo.getTamanoMemoria();
+        int nuevoLimite = dialogo.getLimiteKernel();
+        int nuevoDisco  = dialogo.getTamanoDisco();
 
         this.tamanoMemoriaActual = nuevoTamano;
         this.limiteKernelActual = nuevoLimite;
-        this.tamanoDiscoActual = dialogo.getTamanoDisco(); 
+        this.tamanoDiscoActual = nuevoDisco;
 
         memoria = new Memoria(nuevoTamano, nuevoLimite);
         cpu = new CPU(nuevoLimite);
+        disco = new Disco(nuevoDisco);
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorFijo(
                 nuevoLimite,
                 memoria.getEspacioUsuarioDisponible(),
                 MAX_PROCESOS_DEFAULT);
-        gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador);
+        gestor = new GestorProcesos(memoria, cpu, listaDeTrabajos, particionador, disco);
+
         configurarCallbacks();
-        indiceArchivos.clear();
 
         panelPantalla.limpiar();
         panelPantalla.agregarMensaje(">> Configuracion aplicada:");
         panelPantalla.agregarMensaje(">>   Memoria: " + nuevoTamano + " posiciones");
         panelPantalla.agregarMensaje(">>   Kernel: 0-" + (nuevoLimite - 1)
                 + ", Usuario: " + nuevoLimite + "-" + (nuevoTamano - 1));
-        panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual + " posiciones");
+        panelPantalla.agregarMensaje(">>   Disco: " + nuevoDisco + " posiciones");
 
         refrescarTodo();
     }
@@ -390,11 +353,10 @@ public class VentanaPrincipal extends JFrame {
     private void limpiar() {
         inicializarSistema();
         configurarCallbacks();
-        indiceArchivos.clear();
         panelPantalla.limpiar();
         panelPantalla.agregarMensaje(">> Sistema reiniciado (memoria: "
-                + tamanoMemoriaActual + " posiciones, kernel 0-"
-                + (limiteKernelActual - 1) + ")");
+                + tamanoMemoriaActual + " posiciones, disco: "
+                + tamanoDiscoActual + " posiciones)");
         refrescarTodo();
     }
 
@@ -421,8 +383,6 @@ public class VentanaPrincipal extends JFrame {
                 "Estadisticas", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    /* ==================== REFRESCO ==================== */
-
     private void refrescarTodo() {
         BCP actual = gestor.getProcesoActual();
 
@@ -436,6 +396,12 @@ public class VentanaPrincipal extends JFrame {
 
         int ir = (actual != null) ? actual.getIr() : -1;
         panelMemoria.actualizar(memoria, ir);
-        panelDisco.actualizar(indiceArchivos, tamanoDiscoActual);
+
+        // Convertir el indice del disco a List<String[]>
+        List<String[]> entradas = new ArrayList<>();
+        for (java.util.Map.Entry<String, Integer> e : disco.getIndice().entrySet()) {
+            entradas.add(new String[]{ e.getKey(), "dir " + e.getValue() });
+        }
+        panelDisco.actualizar(entradas, tamanoDiscoActual);
     }
 }

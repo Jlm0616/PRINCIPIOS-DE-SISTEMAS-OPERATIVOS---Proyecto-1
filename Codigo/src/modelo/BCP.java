@@ -36,6 +36,9 @@ import java.util.Stack;
  *   19 = ArchivosAbiertos
  *   20 = Siguiente BCP (direccion de memoria)
  *   21 = Direccion (donde vive este BCP)
+ *
+ * AH y AL no son campos propios: son las dos mitades de AX (como en
+ * la arquitectura x86). Se acceden mediante getAh/setAh/getAl/setAl.
  */
 public class BCP {
 
@@ -174,6 +177,50 @@ public class BCP {
         LocalDateTime fin = getTiempoFin();
         if (inicio == null || fin == null) return -1;
         return Duration.between(inicio, fin).getSeconds();
+    }
+
+    /* ============ AH / AL (partes de AX) ============ */
+
+    /**
+     * Obtiene AH: byte alto de AX (bits 15-8).
+     * Equivalente al registro AH de x86.
+     *
+     * @return valor de AH (0-255)
+     */
+    public int getAh() {
+        return (getAx() >> 8) & 0xFF;
+    }
+
+    /**
+     * Establece AH: modifica solo los 8 bits altos de AX.
+     * AL queda intacto.
+     *
+     * @param ah nuevo valor de AH (0-255)
+     */
+    public void setAh(int ah) {
+        int al = getAl();
+        setAx(((ah & 0xFF) << 8) | al);
+    }
+
+    /**
+     * Obtiene AL: byte bajo de AX (bits 7-0).
+     * Equivalente al registro AL de x86.
+     *
+     * @return valor de AL (0-255)
+     */
+    public int getAl() {
+        return getAx() & 0xFF;
+    }
+
+    /**
+     * Establece AL: modifica solo los 8 bits bajos de AX.
+     * AH queda intacto.
+     *
+     * @param al nuevo valor de AL (0-255)
+     */
+    public void setAl(int al) {
+        int ah = getAh();
+        setAx((ah << 8) | (al & 0xFF));
     }
 
     /* ============ GETTERS ============ */

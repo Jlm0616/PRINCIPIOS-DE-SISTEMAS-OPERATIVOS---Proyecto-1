@@ -5,6 +5,7 @@ import modelo.CPU;
 import modelo.EstadoProceso;
 import modelo.Instruccion;
 import modelo.Memoria;
+import modelo.Disco;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -26,14 +27,15 @@ public class GestorProcesos {
     private Planificador planificador;
     private Despachador despachador;
     private ParticionadorFijo particionador;
-
+    private Disco disco;
+    
     private int siguienteId;
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueados;
     private List<ProcesoEnEspera> procesosEnEspera;
 
     public GestorProcesos(Memoria memoria, CPU cpu, ListaDeTrabajos listaDeTrabajos,
-                          ParticionadorFijo particionador) {
+                          ParticionadorFijo particionador,  Disco disco) {
         this.memoria = memoria;
         this.cpu = cpu;
         this.listaDeTrabajos = listaDeTrabajos;
@@ -44,6 +46,8 @@ public class GestorProcesos {
         this.procesosTerminados = new ArrayList<>();
         this.procesosBloqueados = new ArrayList<>();
         this.procesosEnEspera = new ArrayList<>();
+        this.disco = disco;
+        this.despachador.setDisco(disco);
     }
 
     /* ==================== CREACIÓN DE PROCESOS ==================== */

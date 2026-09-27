@@ -5,6 +5,7 @@ import modelo.CPU;
 import modelo.EstadoProceso;
 import modelo.Instruccion;
 import modelo.Memoria;
+import modelo.Disco;
 
 /**
  * Ejecutor del ciclo de instrucción (fetch-decode-execute) para el Proyecto 1.
@@ -49,11 +50,11 @@ public class EjecutorCPU {
      * @param memoria memoria desde la que se leerán las instrucciones
      * @param bcp     BCP del proceso en ejecución
      */
-    public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp) {
+    public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp, Disco disco) {
         this.cpu = cpu;
         this.memoria = memoria;
         this.bcp = bcp;
-        this.interrupciones = new Interrupciones();
+        this.interrupciones = new Interrupciones(disco);
         this.programaTerminado = false;
     }
 

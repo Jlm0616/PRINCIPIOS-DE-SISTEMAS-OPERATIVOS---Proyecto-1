@@ -3,6 +3,7 @@ package logica;
 import modelo.BCP;
 import modelo.CPU;
 import modelo.EstadoProceso;
+import modelo.Disco;
 
 import java.util.function.Consumer;
 
@@ -26,6 +27,7 @@ public class Despachador {
 
     private CPU cpu;
     private EjecutorCPU ejecutorActual;
+    private Disco disco;
 
     // Callbacks de interrupciones (configurados por la GUI)
     private Consumer<String> salidaPantalla;
@@ -55,7 +57,7 @@ public class Despachador {
         bcp.actualizarHaciaCPU(cpu);
 
         // Crear un ejecutor para este proceso
-        this.ejecutorActual = new EjecutorCPU(cpu, memoria, bcp);
+        this.ejecutorActual = new EjecutorCPU(cpu, memoria, bcp, disco);
 
         // Propagar callbacks de interrupciones
         ejecutorActual.setSalidaPantalla(salidaPantalla);
@@ -120,5 +122,9 @@ public class Despachador {
 
     public void setSolicitudArchivo(Consumer<BCP> callback) {
         this.solicitudArchivo = callback;
+    }
+    
+    public void setDisco(Disco disco) {
+        this.disco = disco;
     }
 }
