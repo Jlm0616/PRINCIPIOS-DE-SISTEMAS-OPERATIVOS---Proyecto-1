@@ -53,6 +53,9 @@ public class GestorProcesos {
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueadosIO;
     private List<BCP> procesosBloqueadosInput;
+    
+    /** Callback de salida a pantalla (INT 10H y mensajes del gestor). */
+    private java.util.function.Consumer<String> salidaPantalla;
 
     /** Tabla del SO: procesos suspendidos y dónde viven en swap. */
     private List<ProcesoEnEspera> procesosSuspendidos;
@@ -263,11 +266,38 @@ public class GestorProcesos {
         return instr.getCodigoInterrupcion(0) == 0x21;
     }
 
+    /**
+     * Ejecuta todos los procesos hasta que terminen.
+     *
+     * Si algún proceso se bloquea esperando input del teclado (INT 09H),
+     * se simula automáticamente un valor aleatorio entre 0 y 255, y se
+     * desbloquea. Esto permite que el modo automático no se quede colgado
+     * esperando intervención del usuario.
+     *
+     * El valor simulado se notifica a la GUI a través del callback de
+     * salida a pantalla, para que quede visible en el PanelPantalla.
+     *
+     * @return cantidad de pasos de CPU ejecutados
+     */
     public int ejecutarAutomatico() {
         int pasos = 0;
         while (hayProcesosActivos()) {
+
+            // Si hay procesos esperando input, simular uno automáticamente.
+            if (!procesosBloqueadosInput.isEmpty()) {
+                int valorSimulado = (int) (Math.random() * 256);   // 0-255
+                String mensaje = ">> [AUTO] Simulando input de teclado: "
+                        + valorSimulado + " (para proceso en espera)";
+                if (salidaPantalla != null) {
+                    salidaPantalla.accept(mensaje);
+                }
+                System.out.println("[GESTOR-AUTO] " + mensaje);
+                desbloquearProceso(valorSimulado);
+            }
+
             ejecutarUnPaso();
             pasos++;
+
             if (pasos > 100000) {
                 throw new IllegalStateException(
                     "Demasiados pasos: posible ciclo infinito entre procesos.");
@@ -492,6 +522,7 @@ public class GestorProcesos {
     /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
 
     public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
+        this.salidaPantalla = callback;
         despachador.setSalidaPantalla(callback);
     }
 
