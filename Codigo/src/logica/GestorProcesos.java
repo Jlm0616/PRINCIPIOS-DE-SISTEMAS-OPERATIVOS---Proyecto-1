@@ -18,26 +18,20 @@ import java.util.List;
  * Responsabilidades:
  *   - Cargar archivos .asm y convertirlos en procesos.
  *   - Gestionar el ciclo de vida (crear, ejecutar, bloquear, terminar).
- *   - Manejar swap in/out cuando no hay partición libre o kernel lleno:
- *       * READY_SUSPEND:    proceso listo que no cabe en memoria.
- *       * BLOCKED_SUSPEND:  proceso bloqueado que no cabe en memoria.
+ *   - Manejar swap in/out cuando no hay partición libre o kernel lleno.
  *   - Exponer consultas para la GUI.
  *
- * Modelo de swap (Stallings, secciones 3.2 y 3.3):
- *   - El process image (BCP + instrucciones + pila) se mueve COMPLETO
- *     entre memoria principal y swap.
- *   - Cuando un proceso se suspende, su BCP se libera del kernel y
- *     el process image se guarda en posiciones contiguas del swap:
- *       [ BCP: 22 posiciones ][ Instrucciones: N posiciones ]
- *   - Al reactivarse, se reserva un bloque nuevo en kernel, se restauran
- *     los 22 valores del BCP y se recargan las instrucciones.
+ * Modelo de swap (según el profe):
+ *   - El BCP NUNCA se mueve de memoria principal.
+ *   - Solo las INSTRUCCIONES van a swap cuando no hay partición libre.
+ *   - Un proceso en swap está en estado NEW.
+ *   - Cuando entra a memoria, se le crea el BCP y pasa a READY.
  *
- * La lista "procesosSuspendidos" es la "tabla del SO" que describe
- * qué procesos están suspendidos y dónde (Stallings, sección 3.3).
+ * Máximo: 5 BCPs en kernel. Los demás esperan en swap (NEW).
  */
 public class GestorProcesos {
 
-    /** Máximo de procesos permitidos en el sistema (restricción del enunciado). */
+    /** Máximo de BCPs permitidos en memoria principal (restricción del enunciado). */
     public static final int MAX_PROCESOS = 5;
 
     private Memoria memoria;
@@ -53,7 +47,7 @@ public class GestorProcesos {
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueadosIO;
     private List<BCP> procesosBloqueadosInput;
-    
+
     /** Callback de salida a pantalla (INT 10H y mensajes del gestor). */
     private java.util.function.Consumer<String> salidaPantalla;
 
@@ -88,17 +82,15 @@ public class GestorProcesos {
      * Carga un archivo .asm como proceso nuevo.
      *
      * Orden de intentos:
-     *   1. Si hay partición libre Y espacio en kernel → cargar en READY.
-     *   2. Si no → intentar suspender en swap (READY_SUSPEND).
+     *   1. Si hay espacio en kernel (para el BCP) Y partición de usuario
+     *      → cargar en READY (activo).
+     *   2. Si no → suspender en swap (NEW, solo instrucciones).
      *   3. Si tampoco → error con mensaje claro.
+     *
+     * El BCP SIEMPRE vive en kernel. Solo las instrucciones se mueven
+     * a swap cuando no hay espacio en memoria principal.
      */
     public ResultadoCarga cargarPrograma(File archivo) {
-        if (getTotalProcesosActivos() >= MAX_PROCESOS) {
-            return ResultadoCarga.error(
-                "Ya hay " + MAX_PROCESOS + " procesos activos en memoria.\n"
-                + "Espera a que termine alguno o presiona 'Limpiar'.");
-        }
-
         Ensamblador ensamblador = new Ensamblador();
 
         if (!ensamblador.esArchivoValido(archivo)) {
@@ -124,15 +116,15 @@ public class GestorProcesos {
             particionador.liberarParticion(indice);
         }
 
-        // 2. Intentar suspender en swap
+        // 2. No cabe en memoria: intentar swap (NEW)
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
             return resultadoSwap;
         }
 
-        // 3. No hay ni partición, ni kernel, ni swap
+        // 3. No hay ni kernel, ni partición, ni swap
         return ResultadoCarga.error(
-            "No hay espacio en memoria principal (ni partición ni kernel), "
+            "No hay espacio en memoria principal (ni kernel ni partición), "
             + "y la memoria virtual está llena.\n"
             + "Libera espacio o aumenta la memoria en 'Configurar'.");
     }
@@ -140,50 +132,45 @@ public class GestorProcesos {
     /**
      * Suspende un proceso moviéndolo al swap.
      *
-     * Guarda el process image COMPLETO en posiciones contiguas del swap:
-     *   [ BCP (22 posiciones) ][ Instrucciones (N posiciones) ]
+     * Según el profe, el BCP NUNCA se mueve de memoria principal.
+     * Por eso, acá solo se guardan las INSTRUCCIONES en el swap.
+     * El BCP no existe todavía: se creará cuando el proceso entre
+     * a memoria principal.
      *
-     * El BCP no ocupa kernel: sus 22 valores viven en el swap.
-     * La lista procesosSuspendidos registra dónde está cada uno.
+     * El proceso queda en estado NEW.
      *
      * @return EN_ESPERA si se suspendió, ERROR si el swap está lleno
      */
     private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones) {
-        int tamanoNecesario = BCP.POSICIONES_REQUERIDAS + instrucciones.size();
+        int tamanoInstrucciones = instrucciones.size();
 
-        // Verificar que haya espacio libre suficiente
-        if (memoriaVirtual.getEspacioLibre() < tamanoNecesario) {
+        if (memoriaVirtual.getEspacioLibre() < tamanoInstrucciones) {
             return ResultadoCarga.error(
-                "La memoria virtual no tiene espacio suficiente.\n"
-                + "Necesario: " + tamanoNecesario + " posiciones, "
+                "La memoria virtual no tiene espacio para las instrucciones.\n"
+                + "Necesario: " + tamanoInstrucciones + " posiciones, "
                 + "libre: " + memoriaVirtual.getEspacioLibre() + ".");
         }
 
-        // Reservar bloque contiguo
-        int dirSwap = memoriaVirtual.reservarBloque(tamanoNecesario);
+        int dirSwap = memoriaVirtual.reservarBloque(tamanoInstrucciones);
         if (dirSwap == -1) {
             return ResultadoCarga.error("No hay bloque contiguo libre en la memoria virtual.");
         }
 
         int id = siguienteId++;
 
-        // Escribir el BCP en las primeras 22 posiciones
-        Object[] valoresBCP = BCP.valoresIniciales(id, 1, instrucciones.size());
-        memoriaVirtual.escribirBloque(dirSwap, valoresBCP);
-
-        // Escribir las instrucciones en las N posiciones siguientes
+        // Solo las instrucciones van a swap (el BCP no existe todavía)
         Object[] instruccionesArr = instrucciones.toArray();
-        memoriaVirtual.escribirBloque(dirSwap + BCP.POSICIONES_REQUERIDAS, instruccionesArr);
+        memoriaVirtual.escribirBloque(dirSwap, instruccionesArr);
 
-        // Registrar los metadatos en la tabla del SO
+        // Registrar metadatos en la tabla del SO
         ProcesoEnEspera pe = new ProcesoEnEspera(
-                id, EstadoProceso.READY_SUSPEND, tamanoNecesario);
+                id, EstadoProceso.NEW, tamanoInstrucciones);
         pe.setDireccionBaseEnSwap(dirSwap);
         procesosSuspendidos.add(pe);
 
         System.out.println("[SWAP] Proceso " + id
-                + " suspendido en swap (dir=" + dirSwap
-                + ", tamano=" + tamanoNecesario + ")");
+                + " en NEW (swap, dir=" + dirSwap
+                + ", instrucciones=" + tamanoInstrucciones + ")");
 
         return ResultadoCarga.enEspera();
     }
@@ -274,18 +261,14 @@ public class GestorProcesos {
      * desbloquea. Esto permite que el modo automático no se quede colgado
      * esperando intervención del usuario.
      *
-     * El valor simulado se notifica a la GUI a través del callback de
-     * salida a pantalla, para que quede visible en el PanelPantalla.
-     *
      * @return cantidad de pasos de CPU ejecutados
      */
     public int ejecutarAutomatico() {
         int pasos = 0;
         while (hayProcesosActivos()) {
 
-            // Si hay procesos esperando input, simular uno automáticamente.
             if (!procesosBloqueadosInput.isEmpty()) {
-                int valorSimulado = (int) (Math.random() * 256);   // 0-255
+                int valorSimulado = (int) (Math.random() * 256);
                 String mensaje = ">> [AUTO] Simulando input de teclado: "
                         + valorSimulado + " (para proceso en espera)";
                 if (salidaPantalla != null) {
@@ -354,10 +337,11 @@ public class GestorProcesos {
      * Pasos:
      *   1. Verificar que haya partición libre y espacio en kernel.
      *   2. Tomar el primer ProcesoEnEspera de la tabla del SO.
-     *   3. Leer el process image del swap (BCP + instrucciones).
+     *   3. Leer SOLO las instrucciones del swap.
      *   4. Liberar el bloque del swap.
-     *   5. Reservar bloque en kernel y restaurar los 22 valores del BCP.
+     *   5. Crear el BCP en kernel (nuevo, nunca estuvo en memoria).
      *   6. Cargar las instrucciones en la partición de usuario.
+     *   7. Marcar el estado READY y encolar.
      *
      * Si algo falla, el proceso queda intacto en el swap.
      */
@@ -368,26 +352,27 @@ public class GestorProcesos {
 
         int indiceNuevo = particionador.asignarParticion();
         if (indiceNuevo == -1) {
-            return;   // todavía no hay partición libre
+            return;
         }
 
         ProcesoEnEspera pe = procesosSuspendidos.get(0);
 
-        // Reservar bloque en kernel para el BCP restaurado
+        // Reservar bloque en kernel para el BCP nuevo
         int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
         if (direccionBase == -1) {
             particionador.liberarParticion(indiceNuevo);
             return;
         }
 
-        // Leer el process image completo del swap
+        // Leer SOLO las instrucciones del swap
         int dirSwap = pe.getDireccionBaseEnSwap();
-        int tamanoEnSwap = pe.getTamanoEnSwap();
-        int tamanoInstrucciones = tamanoEnSwap - BCP.POSICIONES_REQUERIDAS;
+        int tamanoInstrucciones = pe.getTamanoEnSwap();
 
-        Object[] valoresBCP = memoriaVirtual.leerBloque(dirSwap, BCP.POSICIONES_REQUERIDAS);
-        Object[] instruccionesArr = memoriaVirtual.leerBloque(
-                dirSwap + BCP.POSICIONES_REQUERIDAS, tamanoInstrucciones);
+        Object[] instruccionesArr = memoriaVirtual.leerBloque(dirSwap, tamanoInstrucciones);
+
+        // Liberar bloque del swap
+        memoriaVirtual.liberarBloque(dirSwap, tamanoInstrucciones);
+        procesosSuspendidos.remove(0);
 
         // Convertir Object[] a List<Instruccion>
         List<Instruccion> instrucciones = new ArrayList<>();
@@ -397,15 +382,10 @@ public class GestorProcesos {
             }
         }
 
-        // Liberar el bloque del swap
-        memoriaVirtual.liberarBloque(dirSwap, tamanoEnSwap);
-        procesosSuspendidos.remove(0);
-
-        // Crear el BCP en la nueva dirección y restaurar sus valores
+        // Crear BCP nuevo en kernel (nunca estuvo en memoria)
         BCP bcpRestaurado = new BCP(memoria, direccionBase, pe.getId(), 1);
-        bcpRestaurado.restaurarValores(valoresBCP);
 
-        // Restaurar el proceso en la partición (carga instrucciones + encola)
+        // Cargar instrucciones en usuario + encolar
         admitirEnParticion(bcpRestaurado, instrucciones, indiceNuevo);
 
         System.out.println("[SWAP] Proceso " + bcpRestaurado.getId()

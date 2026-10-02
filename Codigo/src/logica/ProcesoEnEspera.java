@@ -15,9 +15,12 @@ import modelo.EstadoProceso;
  *
  * Atributos:
  *   - id:            identificador del proceso.
- *   - estado:        READY_SUSPEND o BLOCKED_SUSPEND.
- *   - direccionBaseEnSwap: posición donde empieza el process image en swap.
- *   - tamanoEnSwap:  cantidad de posiciones ocupadas (22 + N instrucciones).
+ *   - estado:        NEW, READY_SUSPEND o BLOCKED_SUSPEND.
+ *   - direccionBaseEnSwap: posición donde empiezan las instrucciones en swap.
+ *   - tamanoEnSwap:  cantidad de posiciones ocupadas (N instrucciones).
+ *
+ * Nota: según el profe, el BCP NUNCA se mueve de memoria principal.
+ * Por eso el swap solo guarda las INSTRUCCIONES del proceso.
  */
 public class ProcesoEnEspera {
 
@@ -27,31 +30,31 @@ public class ProcesoEnEspera {
     /** Estado del proceso suspendido. */
     private final EstadoProceso estado;
 
-    /** Dirección base del process image dentro del swap (-1 si no asignada). */
+    /** Dirección base de las instrucciones dentro del swap (-1 si no asignada). */
     private int direccionBaseEnSwap;
 
-    /** Cantidad de posiciones que ocupa en el swap (22 + instrucciones). */
+    /** Cantidad de posiciones que ocupa en el swap (N instrucciones). */
     private final int tamanoEnSwap;
 
     /**
      * Crea los metadatos de un proceso suspendido.
      *
      * @param id              identificador del proceso
-     * @param estado          READY_SUSPEND o BLOCKED_SUSPEND
+     * @param estado          NEW, READY_SUSPEND o BLOCKED_SUSPEND
      * @param tamanoEnSwap    cantidad de posiciones que ocupa en swap
-     *                        (debe ser >= BCP.POSICIONES_REQUERIDAS)
+     *                        (debe ser > 0)
      * @throws IllegalArgumentException si algún argumento es inválido
      */
     public ProcesoEnEspera(int id, EstadoProceso estado, int tamanoEnSwap) {
-        if (estado != EstadoProceso.READY_SUSPEND
+        if (estado != EstadoProceso.NEW
+                && estado != EstadoProceso.READY_SUSPEND
                 && estado != EstadoProceso.BLOCKED_SUSPEND) {
             throw new IllegalArgumentException(
-                "El estado de un proceso suspendido debe ser READY_SUSPEND o BLOCKED_SUSPEND");
+                "El estado de un proceso suspendido debe ser NEW, READY_SUSPEND o BLOCKED_SUSPEND");
         }
-        if (tamanoEnSwap < modelo.BCP.POSICIONES_REQUERIDAS) {
+        if (tamanoEnSwap <= 0) {
             throw new IllegalArgumentException(
-                "El tamaño en swap debe ser al menos "
-                + modelo.BCP.POSICIONES_REQUERIDAS + " posiciones");
+                "El tamaño en swap debe ser mayor a 0");
         }
         this.id = id;
         this.estado = estado;
