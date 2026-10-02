@@ -28,11 +28,26 @@ import java.util.List;
  *   - Cuando entra a memoria, se le crea el BCP y pasa a READY.
  *
  * Máximo: 5 BCPs en kernel. Los demás esperan en swap (NEW).
+ *
+ * FCFS puro no apropiativo estricto:
+ *   - Si un proceso se bloquea por INT 09H (input), la CPU queda
+ *     idle hasta que se desbloquee. NO se ejecuta otro proceso.
+ *   - Si un proceso se bloquea por INT 21H (E/S a disco), se simula
+ *     una tardanza de N segundos. El proceso sigue siendo el actual
+ *     (la CPU espera). Cuando el disco "responde", vuelve a RUNNING.
  */
 public class GestorProcesos {
 
     /** Máximo de BCPs permitidos en memoria principal (restricción del enunciado). */
     public static final int MAX_PROCESOS = 5;
+
+    /** Tardanza simulada del disco según la operación AH de INT 21H. */
+    private static final int TARDANZA_CREAR     = 1;   // AH=3Ch
+    private static final int TARDANZA_ABRIR     = 1;   // AH=3Dh
+    private static final int TARDANZA_LEER      = 2;   // AH=4Dh
+    private static final int TARDANZA_ESCRIBIR  = 2;   // AH=40h
+    private static final int TARDANZA_ELIMINAR  = 1;   // AH=41h
+    private static final int TARDANZA_DEFAULT   = 1;
 
     private Memoria memoria;
     private MemoriaVirtual memoriaVirtual;
@@ -78,18 +93,6 @@ public class GestorProcesos {
 
     /* ==================== CREACIÓN DE PROCESOS ==================== */
 
-    /**
-     * Carga un archivo .asm como proceso nuevo.
-     *
-     * Orden de intentos:
-     *   1. Si hay espacio en kernel (para el BCP) Y partición de usuario
-     *      → cargar en READY (activo).
-     *   2. Si no → suspender en swap (NEW, solo instrucciones).
-     *   3. Si tampoco → error con mensaje claro.
-     *
-     * El BCP SIEMPRE vive en kernel. Solo las instrucciones se mueven
-     * a swap cuando no hay espacio en memoria principal.
-     */
     public ResultadoCarga cargarPrograma(File archivo) {
         Ensamblador ensamblador = new Ensamblador();
 
@@ -112,7 +115,6 @@ public class GestorProcesos {
             if (bcp != null) {
                 return ResultadoCarga.exito(bcp);
             }
-            // No hay espacio en kernel: liberar la partición que acabamos de asignar
             particionador.liberarParticion(indice);
         }
 
@@ -129,18 +131,6 @@ public class GestorProcesos {
             + "Libera espacio o aumenta la memoria en 'Configurar'.");
     }
 
-    /**
-     * Suspende un proceso moviéndolo al swap.
-     *
-     * Según el profe, el BCP NUNCA se mueve de memoria principal.
-     * Por eso, acá solo se guardan las INSTRUCCIONES en el swap.
-     * El BCP no existe todavía: se creará cuando el proceso entre
-     * a memoria principal.
-     *
-     * El proceso queda en estado NEW.
-     *
-     * @return EN_ESPERA si se suspendió, ERROR si el swap está lleno
-     */
     private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones) {
         int tamanoInstrucciones = instrucciones.size();
 
@@ -158,11 +148,9 @@ public class GestorProcesos {
 
         int id = siguienteId++;
 
-        // Solo las instrucciones van a swap (el BCP no existe todavía)
         Object[] instruccionesArr = instrucciones.toArray();
         memoriaVirtual.escribirBloque(dirSwap, instruccionesArr);
 
-        // Registrar metadatos en la tabla del SO
         ProcesoEnEspera pe = new ProcesoEnEspera(
                 id, EstadoProceso.NEW, tamanoInstrucciones);
         pe.setDireccionBaseEnSwap(dirSwap);
@@ -175,11 +163,6 @@ public class GestorProcesos {
         return ResultadoCarga.enEspera();
     }
 
-    /**
-     * Intenta crear un proceso en una partición.
-     *
-     * @return el BCP creado, o null si no hay espacio en kernel
-     */
     private BCP crearProcesoEnParticion(List<Instruccion> instrucciones, int indiceParticion) {
         int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
         if (direccionBase == -1) {
@@ -193,6 +176,34 @@ public class GestorProcesos {
     /* ==================== EJECUCIÓN PASO A PASO ==================== */
 
     public boolean ejecutarUnPaso() {
+        // 1. Si hay procesos esperando input del usuario, CPU idle.
+        if (!procesosBloqueadosInput.isEmpty()) {
+            return true;
+        }
+
+        // 2. Si el proceso actual está BLOCKED por E/S a disco (INT 21H),
+        //    decrementar el contador de tardanza. NO cambiar de proceso.
+        if (despachador.getEjecutorActual() != null) {
+            BCP actualBloqueado = despachador.getEjecutorActual().getBcp();
+            if (actualBloqueado.getEstado() == EstadoProceso.BLOCKED
+                    && actualBloqueado.getPesoPendiente() > 0) {
+
+                actualBloqueado.setPesoPendiente(actualBloqueado.getPesoPendiente() - 1);
+
+                System.out.println("[FCFS] Proceso " + actualBloqueado.getId()
+                        + " esperando disco... ("
+                        + actualBloqueado.getPesoPendiente() + "s restantes)");
+
+                if (actualBloqueado.getPesoPendiente() == 0) {
+                    actualBloqueado.setEstado(EstadoProceso.RUNNING);
+                    System.out.println("[FCFS] Proceso " + actualBloqueado.getId()
+                            + " desbloqueado (disco respondio)");
+                }
+                return true;
+            }
+        }
+
+        // 3. Si no hay proceso en CPU, despachar el siguiente.
         if (!despachador.procesoActualOcupaCPU()) {
             if (despachador.getEjecutorActual() != null) {
                 BCP anterior = despachador.getEjecutorActual().getBcp();
@@ -207,6 +218,9 @@ public class GestorProcesos {
                 return false;
             }
 
+            System.out.println("[FCFS] Cambio de proceso -> ahora ejecuta ID "
+                    + siguiente.getId());
+
             listaDeTrabajos.sacarPrimero();
             despachador.despachar(siguiente, memoria);
         }
@@ -216,26 +230,69 @@ public class GestorProcesos {
         EstadoProceso estado = actual.getEstado();
 
         if (estado == EstadoProceso.EXIT) {
+            System.out.println("[FCFS] Proceso " + actual.getId()
+                    + " TERMINO en instruccion: " + leerInstruccionActual(actual));
+
             procesoTerminado(actual);
             despachador.limpiarEjecutor();
         } else if (estado == EstadoProceso.BLOCKED) {
-            despachador.guardarContexto(actual);
-            actual.setCpuAsignado(-1);
-            despachador.limpiarEjecutor();
-
             if (fueBloqueoIO(actual)) {
-                System.out.println("[GESTOR] Proceso " + actual.getId()
-                    + " BLOCKED por IO -> desbloqueado inmediatamente");
-                actual.setEstado(EstadoProceso.READY);
-                listaDeTrabajos.agregar(actual);
+                // INT 21H: E/S a disco. El proceso sigue siendo el actual.
+                // Se le asigna una tardanza simulada. El contador se decrementa
+                // en los siguientes ejecutarUnPaso().
+                int tardanza = calcularTardanzaDisco(actual);
+                actual.setPesoPendiente(tardanza);
+
+                System.out.println("[FCFS] Proceso " + actual.getId()
+                        + " BLOCKED por IO en: " + leerInstruccionActual(actual)
+                        + " (tardanza=" + tardanza + "s)");
             } else {
+                // INT 09H: input del usuario.
+                System.out.println("[FCFS] Proceso " + actual.getId()
+                        + " BLOCKED en: " + leerInstruccionActual(actual)
+                        + " esperando input");
+
+                despachador.guardarContexto(actual);
+                actual.setCpuAsignado(-1);
+                despachador.limpiarEjecutor();
                 procesosBloqueadosInput.add(actual);
-                System.out.println("[GESTOR] Proceso " + actual.getId()
-                    + " BLOCKED esperando input");
             }
         }
 
         return true;
+    }
+
+    /**
+     * Calcula la tardanza simulada del disco según la operación AH.
+     *
+     * @param bcp BCP del proceso (se lee el registro AH)
+     * @return segundos de tardanza
+     */
+    private int calcularTardanzaDisco(BCP bcp) {
+        int ah = bcp.getAh();
+        switch (ah) {
+            case 0x3C: return TARDANZA_CREAR;
+            case 0x3D: return TARDANZA_ABRIR;
+            case 0x4D: return TARDANZA_LEER;
+            case 0x40: return TARDANZA_ESCRIBIR;
+            case 0x41: return TARDANZA_ELIMINAR;
+            default:   return TARDANZA_DEFAULT;
+        }
+    }
+
+    /**
+     * Lee la instrucción que está en la dirección actual del IR del BCP.
+     */
+    private String leerInstruccionActual(BCP bcp) {
+        int ir = bcp.getIr();
+        if (ir < 0) {
+            return "(sin IR)";
+        }
+        Instruccion instr = memoria.leerInstruccion(ir);
+        if (instr == null) {
+            return "(posicion " + ir + " vacia)";
+        }
+        return "[" + ir + "] " + instr.toString();
     }
 
     private boolean fueBloqueoIO(BCP bcp) {
@@ -258,19 +315,16 @@ public class GestorProcesos {
      *
      * Cada paso dura 1 segundo real (Thread.sleep).
      * Si hay procesos esperando input, se pausa (el tiempo sigue contando).
-     *
-     * @param onPaso callback que se invoca después de cada paso
-     *               (para que la GUI se actualice)
-     * @return cantidad de pasos ejecutados
+     * Si hay un proceso esperando al disco (INT 21H), también se respeta
+     * la tardanza (cada paso decrementa el contador).
      */
     public int ejecutarAutomatico(Runnable onPaso) {
         int pasos = 0;
         while (hayProcesosActivos()) {
 
-            // Si hay procesos esperando input, pausar
             if (!procesosBloqueadosInput.isEmpty()) {
                 try {
-                    Thread.sleep(1000);   // el tiempo sigue contando
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -279,14 +333,11 @@ public class GestorProcesos {
                 continue;
             }
 
-            // Ejecutar 1 paso
             ejecutarUnPaso();
             pasos++;
 
-            // Notificar a la GUI
             if (onPaso != null) onPaso.run();
 
-            // Respetar 1 segundo real
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
@@ -305,12 +356,10 @@ public class GestorProcesos {
     /* ==================== TERMINACIÓN ==================== */
 
     public void procesoTerminado(BCP bcp) {
-        // 1. Marcar estado final
         bcp.setEstado(EstadoProceso.EXIT);
         bcp.marcarFin();
         bcp.setCpuAsignado(-1);
 
-        // 2. Crear snapshot ANTES de liberar el BCP
         BCPTerminado snapshot = new BCPTerminado(
             bcp.getId(),
             bcp.getEstado(),
@@ -321,43 +370,23 @@ public class GestorProcesos {
             bcp.getPrioridad()
         );
 
-        // 3. Agregar snapshot a la lista de terminados
         this.procesosTerminados.add(snapshot);
 
-        // 4. Copiar base y alcance a variables locales
         int base = bcp.getBase();
         int alcance = bcp.getAlcance();
 
-        // 5. Liberar la particion de usuario
         int indice = particionador.indiceDesdePosicion(base);
         particionador.liberarParticion(indice);
 
-        // 6. Limpiar las posiciones de la zona usuario
         for (int i = 0; i < alcance; i++) {
             memoria.escribir(base + i, null);
         }
 
-        // 7. Liberar el bloque del BCP en el kernel
         memoria.liberarBloque(bcp.getDireccionBase(), BCP.POSICIONES_REQUERIDAS);
 
-        // 8. Intentar admitir el siguiente proceso suspendido
         reactivarSiguienteProceso();
     }
 
-    /**
-     * Intenta reactivar un proceso suspendido (swap in).
-     *
-     * Pasos:
-     *   1. Verificar que haya partición libre y espacio en kernel.
-     *   2. Tomar el primer ProcesoEnEspera de la tabla del SO.
-     *   3. Leer SOLO las instrucciones del swap.
-     *   4. Liberar el bloque del swap.
-     *   5. Crear el BCP en kernel (nuevo, nunca estuvo en memoria).
-     *   6. Cargar las instrucciones en la partición de usuario.
-     *   7. Marcar el estado READY y encolar.
-     *
-     * Si algo falla, el proceso queda intacto en el swap.
-     */
     private void reactivarSiguienteProceso() {
         if (procesosSuspendidos.isEmpty()) {
             return;
@@ -370,24 +399,20 @@ public class GestorProcesos {
 
         ProcesoEnEspera pe = procesosSuspendidos.get(0);
 
-        // Reservar bloque en kernel para el BCP nuevo
         int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
         if (direccionBase == -1) {
             particionador.liberarParticion(indiceNuevo);
             return;
         }
 
-        // Leer SOLO las instrucciones del swap
         int dirSwap = pe.getDireccionBaseEnSwap();
         int tamanoInstrucciones = pe.getTamanoEnSwap();
 
         Object[] instruccionesArr = memoriaVirtual.leerBloque(dirSwap, tamanoInstrucciones);
 
-        // Liberar bloque del swap
         memoriaVirtual.liberarBloque(dirSwap, tamanoInstrucciones);
         procesosSuspendidos.remove(0);
 
-        // Convertir Object[] a List<Instruccion>
         List<Instruccion> instrucciones = new ArrayList<>();
         for (Object obj : instruccionesArr) {
             if (obj instanceof Instruccion) {
@@ -395,10 +420,8 @@ public class GestorProcesos {
             }
         }
 
-        // Crear BCP nuevo en kernel (nunca estuvo en memoria)
         BCP bcpRestaurado = new BCP(memoria, direccionBase, pe.getId(), 1);
 
-        // Cargar instrucciones en usuario + encolar
         admitirEnParticion(bcpRestaurado, instrucciones, indiceNuevo);
 
         System.out.println("[SWAP] Proceso " + bcpRestaurado.getId()
@@ -429,7 +452,7 @@ public class GestorProcesos {
         BCP bcp = procesosBloqueadosInput.remove(0);
         bcp.setDx(valor);
         bcp.setEstado(EstadoProceso.READY);
-        listaDeTrabajos.agregar(bcp);
+        listaDeTrabajos.agregarAlPrincipio(bcp);
 
         return true;
     }
@@ -501,9 +524,6 @@ public class GestorProcesos {
         return procesosBloqueadosInput;
     }
 
-    /**
-     * @return lista de procesos suspendidos (en swap), para la UI.
-     */
     public List<ProcesoEnEspera> getProcesosEnEspera() {
         return new ArrayList<>(procesosSuspendidos);
     }

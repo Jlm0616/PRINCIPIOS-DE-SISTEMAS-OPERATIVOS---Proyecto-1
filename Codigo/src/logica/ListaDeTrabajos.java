@@ -93,4 +93,18 @@ public class ListaDeTrabajos {
             }
         }
     }
+    
+    /**
+    * Agrega un BCP al PRINCIPIO de la lista.
+    * Se usa cuando un proceso bloqueado se desbloquea y debe
+    * retomar su lugar original en FCFS puro.
+    */
+   public void agregarAlPrincipio(BCP bcp) {
+       if (bcp == null) {
+           throw new IllegalArgumentException("No se puede agregar un BCP nulo");
+       }
+       bcp.setEstado(EstadoProceso.READY);
+       lista.addFirst(bcp);
+       actualizarEnlaces();
+   }
 }
