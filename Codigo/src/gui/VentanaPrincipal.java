@@ -18,6 +18,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.BorderFactory;
 import javax.swing.UIManager;
+import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 
 import java.awt.BorderLayout;
@@ -28,6 +29,8 @@ import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.FileDialog;
 import java.awt.Toolkit;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -67,6 +70,9 @@ public class VentanaPrincipal extends JFrame {
     private JButton btnLimpiar;
     private JButton btnEstadisticas;
 
+    /** Worker del modo automático (corre en hilo aparte). */
+    private SwingWorker<Integer, Void> workerAutomatico;
+
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
         aplicarLookAndFeel();
@@ -74,6 +80,16 @@ public class VentanaPrincipal extends JFrame {
         setSize(1400, 900);
         setMinimumSize(new Dimension(1200, 700));
         setLocationRelativeTo(null);
+
+        // Cancelar el worker si se cierra la ventana
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                if (workerAutomatico != null && !workerAutomatico.isDone()) {
+                    workerAutomatico.cancel(true);
+                }
+            }
+        });
 
         inicializarSistema();
         inicializarComponentes();
@@ -291,22 +307,72 @@ public class VentanaPrincipal extends JFrame {
         if (gestor.ejecutarUnPaso()) refrescarTodo();
     }
 
+    /**
+     * Ejecuta todos los procesos en modo automático.
+     *
+     * Corre en un SwingWorker (hilo aparte), respetando 1 segundo real
+     * por paso. Si hay procesos esperando input, el worker se pausa y
+     * el tiempo sigue contando hasta que el usuario ingrese un valor.
+     */
     private void ejecutarAutomatico() {
         if (!gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
                     "No hay procesos para ejecutar.\nCarga un archivo .asm primero.");
             return;
         }
-        try {
-            int pasos = gestor.ejecutarAutomatico();
-            panelPantalla.agregarMensaje(">> Ejecucion automatica completada ("
-                    + pasos + " pasos)");
-            refrescarTodo();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this,
-                    "Error durante la ejecucion:\n" + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+
+        deshabilitarBotones();
+
+        workerAutomatico = new SwingWorker<>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                return gestor.ejecutarAutomatico(() -> {
+                    // Notificar a la GUI desde el hilo del worker
+                    publish((Void) null);
+                });
+            }
+
+            @Override
+            protected void process(List<Void> chunks) {
+                // Se ejecuta en el hilo de Swing
+                refrescarTodo();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    int pasos = get();
+                    panelPantalla.agregarMensaje(">> Ejecucion automatica completada ("
+                            + pasos + " pasos)");
+                } catch (java.util.concurrent.CancellationException ex) {
+                    panelPantalla.agregarMensaje(">> Ejecucion automatica cancelada.");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(VentanaPrincipal.this,
+                            "Error durante la ejecucion:\n" + ex.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    habilitarBotones();
+                    refrescarTodo();
+                }
+            }
+        };
+        workerAutomatico.execute();
+    }
+
+    private void deshabilitarBotones() {
+        btnCargar.setEnabled(false);
+        btnEjecutar.setEnabled(false);
+        btnPasoAPaso.setEnabled(false);
+        btnLimpiar.setEnabled(false);
+        btnConfigurar.setEnabled(false);
+    }
+
+    private void habilitarBotones() {
+        btnCargar.setEnabled(true);
+        btnEjecutar.setEnabled(true);
+        btnPasoAPaso.setEnabled(true);
+        btnLimpiar.setEnabled(true);
+        btnConfigurar.setEnabled(true);
     }
 
     private void abrirConfiguracion() {
@@ -367,11 +433,6 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
-    /**
-     * Muestra en pantalla el estado actual de la configuración.
-     * Se usa tanto al aplicar una nueva configuración como al limpiar,
-     * para que el usuario siempre vea los valores vigentes.
-     */
     private void mostrarMensajeConfiguracion() {
         panelPantalla.agregarMensaje(">> Configuracion aplicada:");
         panelPantalla.agregarMensaje(">>   Memoria: " + tamanoMemoriaActual + " posiciones");

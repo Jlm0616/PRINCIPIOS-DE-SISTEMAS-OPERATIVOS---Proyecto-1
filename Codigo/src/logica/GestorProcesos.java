@@ -254,32 +254,45 @@ public class GestorProcesos {
     }
 
     /**
-     * Ejecuta todos los procesos hasta que terminen.
+     * Ejecuta todos los procesos en modo automático.
      *
-     * Si algún proceso se bloquea esperando input del teclado (INT 09H),
-     * se simula automáticamente un valor aleatorio entre 0 y 255, y se
-     * desbloquea. Esto permite que el modo automático no se quede colgado
-     * esperando intervención del usuario.
+     * Cada paso dura 1 segundo real (Thread.sleep).
+     * Si hay procesos esperando input, se pausa (el tiempo sigue contando).
      *
-     * @return cantidad de pasos de CPU ejecutados
+     * @param onPaso callback que se invoca después de cada paso
+     *               (para que la GUI se actualice)
+     * @return cantidad de pasos ejecutados
      */
-    public int ejecutarAutomatico() {
+    public int ejecutarAutomatico(Runnable onPaso) {
         int pasos = 0;
         while (hayProcesosActivos()) {
 
+            // Si hay procesos esperando input, pausar
             if (!procesosBloqueadosInput.isEmpty()) {
-                int valorSimulado = (int) (Math.random() * 256);
-                String mensaje = ">> [AUTO] Simulando input de teclado: "
-                        + valorSimulado + " (para proceso en espera)";
-                if (salidaPantalla != null) {
-                    salidaPantalla.accept(mensaje);
+                try {
+                    Thread.sleep(1000);   // el tiempo sigue contando
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
-                System.out.println("[GESTOR-AUTO] " + mensaje);
-                desbloquearProceso(valorSimulado);
+                if (onPaso != null) onPaso.run();
+                continue;
             }
 
+            // Ejecutar 1 paso
             ejecutarUnPaso();
             pasos++;
+
+            // Notificar a la GUI
+            if (onPaso != null) onPaso.run();
+
+            // Respetar 1 segundo real
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
 
             if (pasos > 100000) {
                 throw new IllegalStateException(
