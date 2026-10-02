@@ -218,7 +218,6 @@ public class PanelProcesos extends JPanel {
     public void actualizarLista(ListaDeTrabajos lista,
                                 BCP procesoActual,
                                 List<BCP> procesosBloqueados,
-                                List<BCPTerminado> procesosTerminados,
                                 List<ProcesoEnEspera> procesosEnEspera) {
         modeloProcesos.setRowCount(0);
         Set<Integer> idsAgregados = new HashSet<>();
@@ -251,18 +250,6 @@ public class PanelProcesos extends JPanel {
                     modeloProcesos.addRow(new Object[]{
                         "ID " + bcp.getId(),
                         bcp.getEstado().toString()
-                    });
-                }
-            }
-        }
-
-        // 4. Procesos terminados (BCPTerminado, no BCP)
-        if (procesosTerminados != null) {
-            for (BCPTerminado pt : procesosTerminados) {
-                if (idsAgregados.add(pt.getId())) {
-                    modeloProcesos.addRow(new Object[]{
-                        "ID " + pt.getId(),
-                        pt.getEstado().toString()
                     });
                 }
             }

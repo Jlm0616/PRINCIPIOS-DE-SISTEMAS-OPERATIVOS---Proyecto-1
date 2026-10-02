@@ -473,7 +473,6 @@ public class VentanaPrincipal extends JFrame {
                 listaDeTrabajos,
                 actual,
                 gestor.getProcesosBloqueados(),
-                gestor.getProcesosTerminados(),
                 gestor.getProcesosEnEspera());
         panelProcesos.actualizarBCP(actual);
 
