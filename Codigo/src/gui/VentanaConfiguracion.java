@@ -13,19 +13,16 @@ import java.awt.Frame;
 /**
  * Ventana modal de configuracion del sistema.
  *
- * Es una fachada que agrupa los paneles de configuracion en pestañas:
+ * Agrupa los paneles de configuracion en 2 pestañas:
  *   - Memoria principal (PanelConfigMemoria)
- *   - Memoria virtual / swap (PanelConfigMemoriaVirtual)
- *   - Disco (PanelConfigDisco)
+ *   - Disco (PanelConfigDisco: tamaño, maxArchivos, swap)
  *
- * No crea objetos Memoria, MemoriaVirtual ni Disco: solo captura y
- * valida los valores. Quien la usa (VentanaPrincipal) es responsable
- * de aplicarlos.
+ * No crea objetos Memoria ni Disco: solo captura y valida los valores.
+ * Quien la usa (VentanaPrincipal) es responsable de aplicarlos.
  */
 public class VentanaConfiguracion extends JDialog {
 
     private PanelConfigMemoria panelMemoria;
-    private PanelConfigMemoriaVirtual panelMemoriaVirtual;   // ← CAMBIO
     private PanelConfigDisco panelDisco;
     private JTabbedPane tabs;
 
@@ -33,32 +30,36 @@ public class VentanaConfiguracion extends JDialog {
 
     private int tamanoMemoria;
     private int limiteKernel;
-    private int tamanoMemoriaVirtual;   // ← CAMBIO
     private int tamanoDisco;
+    private int maxArchivos;
+    private int tamanoSwap;
 
     /**
      * Crea la ventana modal.
      *
-     * @param propietario               ventana padre
-     * @param tamanoMemoriaActual       valor inicial de memoria
-     * @param limiteKernelActual        valor inicial del limite kernel
-     * @param tamanoMemoriaVirtualActual valor inicial de la memoria virtual
-     * @param tamanoDiscoActual         valor inicial del disco
+     * @param propietario          ventana padre
+     * @param tamanoMemoriaActual  valor inicial de memoria
+     * @param limiteKernelActual   valor inicial del limite kernel
+     * @param tamanoDiscoActual    valor inicial del disco
+     * @param maxArchivosActual    valor inicial de maxArchivos
+     * @param tamanoSwapActual     valor inicial de la memoria virtual
      */
     public VentanaConfiguracion(Frame propietario,
                                  int tamanoMemoriaActual,
                                  int limiteKernelActual,
-                                 int tamanoMemoriaVirtualActual,   // ← CAMBIO
-                                 int tamanoDiscoActual) {
+                                 int tamanoDiscoActual,
+                                 int maxArchivosActual,
+                                 int tamanoSwapActual) {
         super(propietario, "Configuracion", true);
         this.confirmado = false;
         this.tamanoMemoria = tamanoMemoriaActual;
         this.limiteKernel = limiteKernelActual;
-        this.tamanoMemoriaVirtual = tamanoMemoriaVirtualActual;   // ← CAMBIO
         this.tamanoDisco = tamanoDiscoActual;
+        this.maxArchivos = maxArchivosActual;
+        this.tamanoSwap = tamanoSwapActual;
 
         construirInterfaz(tamanoMemoriaActual, limiteKernelActual,
-                          tamanoMemoriaVirtualActual, tamanoDiscoActual);   // ← CAMBIO
+                          tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
         pack();
         setResizable(false);
         setLocationRelativeTo(propietario);
@@ -66,15 +67,14 @@ public class VentanaConfiguracion extends JDialog {
 
     private void construirInterfaz(int tamanoMemoriaActual,
                                     int limiteKernelActual,
-                                    int tamanoMemoriaVirtualActual,   // ← CAMBIO
-                                    int tamanoDiscoActual) {
+                                    int tamanoDiscoActual,
+                                    int maxArchivosActual,
+                                    int tamanoSwapActual) {
         panelMemoria = new PanelConfigMemoria(tamanoMemoriaActual, limiteKernelActual);
-        panelMemoriaVirtual = new PanelConfigMemoriaVirtual(tamanoMemoriaVirtualActual);   // ← CAMBIO
-        panelDisco = new PanelConfigDisco(tamanoDiscoActual);
+        panelDisco = new PanelConfigDisco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
 
         tabs = new JTabbedPane();
         tabs.addTab("Memoria", panelMemoria);
-        tabs.addTab("Memoria Virtual", panelMemoriaVirtual);   // ← CAMBIO
         tabs.addTab("Disco", panelDisco);
 
         JButton btnAceptar = new JButton("Aceptar");
@@ -101,12 +101,7 @@ public class VentanaConfiguracion extends JDialog {
             tabs.setSelectedComponent(panelMemoria);
             return;
         }
-        // Validar memoria virtual   // ← CAMBIO
-        if (!panelMemoriaVirtual.validar()) {
-            tabs.setSelectedComponent(panelMemoriaVirtual);
-            return;
-        }
-        // Validar disco
+        // Validar disco (incluye maxArchivos y swap)
         if (!panelDisco.validar()) {
             tabs.setSelectedComponent(panelDisco);
             return;
@@ -115,8 +110,9 @@ public class VentanaConfiguracion extends JDialog {
         // Guardar valores
         tamanoMemoria = panelMemoria.getTamanoMemoria();
         limiteKernel = panelMemoria.getLimiteKernel();
-        tamanoMemoriaVirtual = panelMemoriaVirtual.getTamanoMemoriaVirtual();   // ← CAMBIO
         tamanoDisco = panelDisco.getTamanoDisco();
+        maxArchivos = panelDisco.getMaxArchivos();
+        tamanoSwap = panelDisco.getTamanoSwap();
         confirmado = true;
         dispose();
     }
@@ -133,11 +129,15 @@ public class VentanaConfiguracion extends JDialog {
         return limiteKernel;
     }
 
-    public int getTamanoMemoriaVirtual() {   // ← CAMBIO
-        return tamanoMemoriaVirtual;
-    }
-
     public int getTamanoDisco() {
         return tamanoDisco;
+    }
+
+    public int getMaxArchivos() {
+        return maxArchivos;
+    }
+
+    public int getTamanoSwap() {
+        return tamanoSwap;
     }
 }

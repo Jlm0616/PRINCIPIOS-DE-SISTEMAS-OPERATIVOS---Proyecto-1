@@ -10,68 +10,45 @@ import java.util.function.Consumer;
  *
  * Segun Stallings (seccion 3.4, "Process Control"), las interrupciones
  * son supervisor calls: el programa en ejecucion pide un servicio al SO.
- * El SO puede:
  *
- *   - Imprimir un valor en pantalla (INT 10H).
- *   - Leer un valor del teclado (INT 09H).
- *   - Realizar una operacion de archivo (INT 21H).
- *   - Terminar el proceso (INT 20H).
+ * INT 21H: manejo de archivos.
+ *   AH = operacion:
+ *     3Ch -> crear
+ *     3Dh -> abrir
+ *     4Dh -> leer
+ *     40h -> escribir
+ *     41h -> eliminar
+ *   DX = numero usado para construir el nombre "archivo_<DX>".
+ *   AL = resultado (0 exito, 1 error, o contenido leido).
  *
- * Las interrupciones NO modifican el estado del proceso directamente;
- * solo devuelven un ResultadoInterrupcion que indica a quien las invoca
- * como debe continuar la ejecucion.
- *
- * Los callbacks permiten desacoplar la logica de las interrupciones de
- * la interfaz grafica: la GUI configura que hacer cuando hay salida a
- * pantalla o cuando se necesita input del usuario.
+ * El disco simulado tiene 3 zonas: indice, swap, archivos.
+ * Los archivos se registran en el indice con su nombre y sus
+ * posiciones de inicio/fin en la zona de archivos.
  */
 public class Interrupciones {
 
-    /** Disco simulado donde se almacenan los archivos. */
     private final Disco disco;
 
     /* ==================== CALLBACKS ==================== */
 
-    /** Se invoca cuando hay salida a pantalla (INT 10H). */
     private Consumer<String> salidaPantalla;
-
-    /** Se invoca cuando se necesita input del teclado (INT 09H). */
     private Consumer<BCP> solicitudTeclado;
-
-    /** Se invoca cuando se necesita una operacion de archivo (INT 21H). */
     private Consumer<BCP> solicitudArchivo;
 
     /* ==================== CONSTRUCTOR ==================== */
 
-    /**
-     * Crea el manejador de interrupciones asociado a un disco.
-     *
-     * @param disco disco simulado para las operaciones de archivo
-     */
     public Interrupciones(Disco disco) {
         this.disco = disco;
     }
 
     /* ==================== EJECUCION ==================== */
 
-    /**
-     * Ejecuta la interrupcion indicada.
-     *
-     * @param codigo codigo decimal de la interrupcion (ej. 0x20, 0x10, 0x09, 0x21)
-     * @param bcp    BCP del proceso que ejecuta la interrupcion
-     * @return el resultado de la interrupcion (sigue vivo, bloqueado o terminado)
-     * @throws UnsupportedOperationException si el codigo no esta soportado
-     */
     public ResultadoInterrupcion ejecutar(int codigo, BCP bcp) {
         switch (codigo) {
-            case 0x20:
-                return ejecutarFinPrograma(bcp);
-            case 0x10:
-                return ejecutarImprimirPantalla(bcp);
-            case 0x09:
-                return ejecutarLecturaTeclado(bcp);
-            case 0x21:
-                return ejecutarManejoArchivos(bcp);
+            case 0x20: return ejecutarFinPrograma(bcp);
+            case 0x10: return ejecutarImprimirPantalla(bcp);
+            case 0x09: return ejecutarLecturaTeclado(bcp);
+            case 0x21: return ejecutarManejoArchivos(bcp);
             default:
                 throw new UnsupportedOperationException(
                     "Interrupcion no soportada: " + Integer.toHexString(codigo) + "H");
@@ -80,19 +57,11 @@ public class Interrupciones {
 
     /* ==================== MANEJADORES ==================== */
 
-    /**
-     * INT 20H: termina el programa.
-     * El proceso pasa a EXIT y se registra el fin.
-     */
     private ResultadoInterrupcion ejecutarFinPrograma(BCP bcp) {
         bcp.marcarFin();
         return ResultadoInterrupcion.TERMINADO;
     }
 
-    /**
-     * INT 10H: imprime el valor de DX en la pantalla simulada.
-     * El proceso continua en RUNNING.
-     */
     private ResultadoInterrupcion ejecutarImprimirPantalla(BCP bcp) {
         String mensaje = "[PANTALLA] DX = " + bcp.getDx();
         if (salidaPantalla != null) {
@@ -101,10 +70,6 @@ public class Interrupciones {
         return ResultadoInterrupcion.RUNNING;
     }
 
-    /**
-     * INT 09H: lee un valor numerico (0-255) del teclado.
-     * El proceso se bloquea hasta que el usuario ingrese un valor.
-     */
     private ResultadoInterrupcion ejecutarLecturaTeclado(BCP bcp) {
         if (solicitudTeclado != null) {
             solicitudTeclado.accept(bcp);
@@ -115,23 +80,8 @@ public class Interrupciones {
     /**
      * INT 21H: manejo de archivos.
      *
-     * AH indica la operacion:
-     *   3Ch -> crear archivo
-     *   3Dh -> abrir archivo
-     *   4Dh -> leer archivo
-     *   40h -> escribir archivo
-     *   41h -> eliminar archivo
-     *
-     * DX contiene un numero que se usa para construir el nombre del archivo
-     * (formato: "archivo_<DX>").
-     *
-     * AL contiene el resultado:
-     *   - 0 si la operacion fue exitosa
-     *   - 1 si hubo error
-     *   - El contenido leido (para AH=4Dh)
-     *
-     * El proceso continua en RUNNING porque la operacion se realiza
-     * inmediatamente (no hay espera de E/S real).
+     * El archivo se identifica por "archivo_<DX>".
+     * El disco registra los archivos en su indice (nombre, inicio, fin).
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
@@ -144,7 +94,7 @@ public class Interrupciones {
 
         switch (ah) {
             case 0x3C: {  // crear archivo
-                boolean creado = disco.crear(nombre);
+                boolean creado = crearArchivoEnDisco(nombre);
                 bcp.setAl(creado ? 0 : 1);
                 System.out.println("[DISCO] crear(" + nombre + ") = " + creado);
                 break;
@@ -158,7 +108,7 @@ public class Interrupciones {
             }
 
             case 0x4D: {  // leer archivo
-                String contenido = disco.leer(nombre);
+                String contenido = leerArchivoDeDisco(nombre);
                 if (contenido != null && !contenido.isEmpty()) {
                     bcp.setAl(contenido.charAt(0));
                 } else {
@@ -171,27 +121,123 @@ public class Interrupciones {
             case 0x40: {  // escribir archivo
                 int al = bcp.getAl();
                 String aEscribir = String.valueOf((char) al);
-                boolean escrito = disco.escribir(nombre, aEscribir);
+                boolean escrito = escribirArchivoEnDisco(nombre, aEscribir);
                 bcp.setAl(escrito ? 0 : 1);
                 System.out.println("[DISCO] escribir(" + nombre + ", " + aEscribir + ")");
                 break;
             }
 
             case 0x41: {  // eliminar archivo
-                boolean eliminado = disco.eliminar(nombre);
+                boolean eliminado = eliminarArchivoDeDisco(nombre);
                 bcp.setAl(eliminado ? 0 : 1);
                 System.out.println("[DISCO] eliminar(" + nombre + ") = " + eliminado);
                 break;
             }
 
             default: {
-                bcp.setAl(0xFF);   // operacion desconocida
+                bcp.setAl(0xFF);
                 System.out.println("[DISCO] operacion desconocida: AH=" + Integer.toHexString(ah));
                 break;
             }
         }
 
         return ResultadoInterrupcion.BLOQUEADO;
+    }
+
+    /* ==================== HELPERS DE ARCHIVOS ==================== */
+
+    /**
+     * Crea un archivo vacio en el disco (1 posicion reservada).
+     * Lo registra en el indice.
+     */
+    private boolean crearArchivoEnDisco(String nombre) {
+        if (disco.existe(nombre)) return false;
+
+        int inicio = disco.reservarBloqueArchivo(1);
+        if (inicio == -1) return false;
+
+        // Escribir un caracter vacio
+        disco.escribir(inicio, "");
+
+        return disco.registrarArchivo(nombre, inicio, inicio);
+    }
+
+    /**
+     * Lee el contenido completo de un archivo desde el disco.
+     */
+    private String leerArchivoDeDisco(String nombre) {
+        if (!disco.existe(nombre)) return null;
+
+        int inicio = disco.getInicioArchivo(nombre);
+        int fin = disco.getFinArchivo(nombre);
+        if (inicio == -1 || fin == -1) return null;
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = inicio; i <= fin; i++) {
+            Object v = disco.leer(i);
+            if (v != null) sb.append(v.toString());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Escribe contenido en un archivo existente.
+     * Si el contenido es mas grande que el bloque actual, intenta
+     * reservar un bloque mas grande.
+     */
+    private boolean escribirArchivoEnDisco(String nombre, String contenido) {
+        if (!disco.existe(nombre)) return false;
+        if (contenido == null) return false;
+
+        int inicioViejo = disco.getInicioArchivo(nombre);
+        int finViejo = disco.getFinArchivo(nombre);
+        int tamanoViejo = (finViejo - inicioViejo) + 1;
+
+        // Si el contenido cabe en el bloque actual, sobreescribir
+        if (contenido.length() <= tamanoViejo) {
+            for (int i = 0; i < contenido.length(); i++) {
+                disco.escribir(inicioViejo + i, String.valueOf(contenido.charAt(i)));
+            }
+            // Limpiar el resto del bloque
+            for (int i = contenido.length(); i < tamanoViejo; i++) {
+                disco.escribir(inicioViejo + i, null);
+            }
+            return true;
+        }
+
+        // Contenido mas grande: reservar bloque nuevo y liberar el viejo
+        int nuevoInicio = disco.reservarBloqueArchivo(contenido.length());
+        if (nuevoInicio == -1) return false;
+
+        // Escribir el contenido
+        for (int i = 0; i < contenido.length(); i++) {
+            disco.escribir(nuevoInicio + i, String.valueOf(contenido.charAt(i)));
+        }
+
+        // Liberar bloque viejo
+        disco.liberarBloqueArchivo(inicioViejo, tamanoViejo);
+
+        // Actualizar indice
+        disco.eliminarDelIndice(nombre);
+        return disco.registrarArchivo(nombre, nuevoInicio, nuevoInicio + contenido.length() - 1);
+    }
+
+    /**
+     * Elimina un archivo: libera su bloque y lo quita del indice.
+     */
+    private boolean eliminarArchivoDeDisco(String nombre) {
+        if (!disco.existe(nombre)) return false;
+
+        int inicio = disco.getInicioArchivo(nombre);
+        int fin = disco.getFinArchivo(nombre);
+        if (inicio == -1 || fin == -1) return false;
+
+        int tamano = (fin - inicio) + 1;
+
+        disco.liberarBloqueArchivo(inicio, tamano);
+        disco.eliminarDelIndice(nombre);
+
+        return true;
     }
 
     /* ==================== CONFIGURACION DE CALLBACKS ==================== */

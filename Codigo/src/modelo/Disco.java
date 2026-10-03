@@ -1,197 +1,455 @@
 package modelo;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Disco simulado: almacena archivos como pares (nombre -> contenido)
- * y mantiene un indice (nombre -> direccion simulada).
+ * Disco simulado (almacenamiento secundario).
  *
- * Segun el enunciado, el disco tiene un tamano configurable (default 512)
- * y un indice de archivos en los primeros registros. En esta simulacion:
- *   - El indice vive en un Map<String, Integer>.
- *   - Las direcciones se asignan secuencialmente a partir de
- *     PRIMERA_DIRECCION_CONTENIDO.
- *   - El contenido de los archivos vive en un Map<String, String>.
+ * El disco se divide en TRES zonas contiguas:
+ *
+ *   ┌─────────────────────────────────────────────────────┐
+ *   │  ZONA 1: Índice de archivos                         │
+ *   │  ├── maxArchivos configurable (default 10)          │
+ *   │  ├── 3 posiciones por archivo:                      │
+ *   │  │     [nombre] [inicio] [fin]                      │
+ *   │  └── Total = maxArchivos * 3                        │
+ *   ├─────────────────────────────────────────────────────┤
+ *   │  ZONA 2: Memoria virtual (swap)                     │
+ *   │  ├── tamaño configurable (default 64)               │
+ *   │  └── guarda instrucciones de procesos NEW           │
+ *   ├─────────────────────────────────────────────────────┤
+ *   │  ZONA 3: Archivos                                   │
+ *   │  └── contenido de los .asm y otros archivos         │
+ *   └─────────────────────────────────────────────────────┘
+ *
+ * Analogía con el modelo de Stallings:
+ *   - Memoria principal = procesos activos (READY, RUNNING, BLOCKED).
+ *   - Disco             = índice + swap + archivos.
+ *
+ * La memoria virtual NO es una clase aparte: es una zona del disco.
  */
 public class Disco {
 
-    /** Tamano total del disco (en "posiciones" simuladas). */
+    /** Tamaño mínimo del disco (en posiciones). */
+    public static final int TAMANO_MINIMO = 128;
+
+    /** Cantidad máxima de archivos en el índice (configurable). */
+    public static final int MAX_ARCHIVOS_DEFAULT = 10;
+
+    /** Cantidad mínima de archivos en el índice. */
+    public static final int MAX_ARCHIVOS_MINIMO = 1;
+
+    /** Posiciones por entrada del índice (nombre, inicio, fin). */
+    public static final int POSICIONES_POR_ENTRADA_INDICE = 3;
+
+    /** Tamaño mínimo de la memoria virtual (swap). */
+    public static final int TAMANO_SWAP_MINIMO = 16;
+
+    /** Tamaño por defecto de la memoria virtual (swap). */
+    public static final int TAMANO_SWAP_DEFAULT = 64;
+
+    /** Posiciones mínimas reservadas para archivos. */
+    public static final int ESPACIO_ARCHIVOS_MINIMO = 64;
+
+    /* ==================== CONFIGURACIÓN ==================== */
+
     private final int tamanoTotal;
+    private final int maxArchivos;
+    private final int tamanoSwap;
 
-    /** Cantidad maxima de archivos que caben en el indice. */
-    public static final int MAX_ARCHIVOS = 20;
+    /* ==================== ZONAS (calculadas) ==================== */
 
-    /** Primera direccion disponible para el contenido de los archivos. */
-    public static final int PRIMERA_DIRECCION_CONTENIDO = 100;
+    private final int inicioIndice;      // 0
+    private final int inicioSwap;        // maxArchivos * 3
+    private final int inicioArchivos;    // maxArchivos * 3 + tamanoSwap
 
-    /** Archivos: nombre -> contenido. */
-    private final Map<String, String> archivos;
+    /* ==================== CONTENIDO ==================== */
 
-    /** Indice: nombre -> direccion simulada. */
-    private final Map<String, Integer> indice;
+    /** Contenido de cada posición del disco. */
+    private final Object[] posiciones;
 
-    /** Proxima direccion libre para el contenido. */
-    private int proximaDireccion;
+    /* ==================== CONSTRUCTOR ==================== */
 
     /**
-     * Crea un disco vacio con el tamano indicado.
+     * Crea un disco con la configuración indicada.
      *
-     * @param tamanoTotal cantidad de posiciones del disco (>= 1)
-     * @throws IllegalArgumentException si tamanoTotal < 1
+     * @param tamanoTotal  tamaño total del disco (>= TAMANO_MINIMO)
+     * @param maxArchivos  cantidad máxima de archivos en el índice
+     *                     (>= MAX_ARCHIVOS_MINIMO)
+     * @param tamanoSwap   tamaño de la memoria virtual dentro del disco
+     *                     (>= TAMANO_SWAP_MINIMO)
+     * @throws IllegalArgumentException si la configuración es inválida
      */
-    public Disco(int tamanoTotal) {
-        if (tamanoTotal < 1) {
-            throw new IllegalArgumentException("El tamano del disco debe ser >= 1");
+    public Disco(int tamanoTotal, int maxArchivos, int tamanoSwap) {
+        if (tamanoTotal < TAMANO_MINIMO) {
+            throw new IllegalArgumentException(
+                "El tamaño del disco debe ser al menos " + TAMANO_MINIMO);
         }
+        if (maxArchivos < MAX_ARCHIVOS_MINIMO) {
+            throw new IllegalArgumentException(
+                "Debe haber al menos " + MAX_ARCHIVOS_MINIMO + " archivo en el índice");
+        }
+        if (tamanoSwap < TAMANO_SWAP_MINIMO) {
+            throw new IllegalArgumentException(
+                "La memoria virtual debe ser al menos " + TAMANO_SWAP_MINIMO);
+        }
+
+        int espacioIndice = maxArchivos * POSICIONES_POR_ENTRADA_INDICE;
+        int espacioOcupado = espacioIndice + tamanoSwap;
+        int espacioArchivos = tamanoTotal - espacioOcupado;
+
+        if (espacioArchivos < ESPACIO_ARCHIVOS_MINIMO) {
+            throw new IllegalArgumentException(
+                "El disco es muy pequeño: índice (" + espacioIndice
+                + ") + swap (" + tamanoSwap + ") dejan solo "
+                + espacioArchivos + " posiciones para archivos (mínimo "
+                + ESPACIO_ARCHIVOS_MINIMO + ")");
+        }
+
         this.tamanoTotal = tamanoTotal;
-        this.archivos = new HashMap<>();
-        this.indice = new HashMap<>();
-        this.proximaDireccion = PRIMERA_DIRECCION_CONTENIDO;
+        this.maxArchivos = maxArchivos;
+        this.tamanoSwap = tamanoSwap;
+
+        this.inicioIndice = 0;
+        this.inicioSwap = espacioIndice;
+        this.inicioArchivos = espacioIndice + tamanoSwap;
+
+        this.posiciones = new Object[tamanoTotal];
     }
 
-    /* ==================== OPERACIONES ==================== */
+    /* ==================== ACCESO PUNTUAL ==================== */
 
     /**
-     * Crea un archivo vacio en el disco y lo registra en el indice.
-     * Falla si el archivo ya existe o si el indice esta lleno.
+     * Lee el contenido de una posición del disco.
+     */
+    public Object leer(int posicion) {
+        return posiciones[posicion];
+    }
+
+    /**
+     * Escribe un valor en una posición del disco.
+     */
+    public void escribir(int posicion, Object valor) {
+        posiciones[posicion] = valor;
+    }
+
+    /* ==================== ZONA 1: ÍNDICE ==================== */
+
+    /**
+     * Registra un archivo en el índice.
      *
      * @param nombre nombre del archivo
-     * @return true si se creo correctamente
+     * @param inicio posición donde empieza el contenido en la zona de archivos
+     * @param fin    posición donde termina (inclusive)
+     * @return true si se registró, false si el índice está lleno
      */
-    public boolean crear(String nombre) {
-        if (nombre == null || nombre.isEmpty()) {
-            return false;
-        }
-        if (archivos.containsKey(nombre)) {
-            return false;   // ya existe
-        }
-        if (indice.size() >= MAX_ARCHIVOS) {
-            return false;   // indice lleno
-        }
-        archivos.put(nombre, "");
-        indice.put(nombre, proximaDireccion);
-        proximaDireccion += 50;   // cada archivo ocupa 50 posiciones simuladas
+    public boolean registrarArchivo(String nombre, int inicio, int fin) {
+        if (nombre == null || nombre.isEmpty()) return false;
+        if (getCantidadArchivos() >= maxArchivos) return false;
+
+        int entrada = buscarEntradaLibre();
+        if (entrada == -1) return false;
+
+        posiciones[entrada]     = nombre;
+        posiciones[entrada + 1] = inicio;
+        posiciones[entrada + 2] = fin;
         return true;
     }
 
     /**
-     * Verifica si un archivo existe en el disco.
+     * Elimina un archivo del índice.
+     *
+     * @param nombre nombre del archivo
+     * @return true si se eliminó
+     */
+    public boolean eliminarDelIndice(String nombre) {
+        int entrada = buscarEntradaPorNombre(nombre);
+        if (entrada == -1) return false;
+
+        posiciones[entrada]     = null;
+        posiciones[entrada + 1] = null;
+        posiciones[entrada + 2] = null;
+        return true;
+    }
+
+    /**
+     * Verifica si un archivo existe en el índice.
      */
     public boolean existe(String nombre) {
-        return nombre != null && archivos.containsKey(nombre);
+        return buscarEntradaPorNombre(nombre) != -1;
     }
 
     /**
-     * Lee el contenido de un archivo.
-     *
-     * @param nombre nombre del archivo
-     * @return contenido del archivo, o null si no existe
+     * @return la posición de inicio del contenido del archivo, o -1 si no existe.
      */
-    public String leer(String nombre) {
-        if (nombre == null) return null;
-        return archivos.get(nombre);
+    public int getInicioArchivo(String nombre) {
+        int entrada = buscarEntradaPorNombre(nombre);
+        if (entrada == -1) return -1;
+        Integer inicio = (Integer) posiciones[entrada + 1];
+        return (inicio != null) ? inicio : -1;
     }
 
     /**
-     * Escribe contenido en un archivo existente.
-     *
-     * @param nombre    nombre del archivo
-     * @param contenido contenido a escribir
-     * @return true si se escribio correctamente
+     * @return la posición de fin del contenido del archivo, o -1 si no existe.
      */
-    public boolean escribir(String nombre, String contenido) {
-        if (nombre == null || contenido == null) {
-            return false;
-        }
-        if (!archivos.containsKey(nombre)) {
-            return false;   // no existe
-        }
-        archivos.put(nombre, contenido);
-        return true;
+    public int getFinArchivo(String nombre) {
+        int entrada = buscarEntradaPorNombre(nombre);
+        if (entrada == -1) return -1;
+        Integer fin = (Integer) posiciones[entrada + 2];
+        return (fin != null) ? fin : -1;
     }
 
     /**
-     * Guarda un archivo completo en el disco.
-     * Si no existe, lo crea; si existe, sobreescribe el contenido.
-     *
-     * @param nombre    nombre del archivo
-     * @param contenido contenido a guardar
-     * @return true si se guardo correctamente
+     * @return la cantidad de archivos actualmente registrados.
      */
-    public boolean guardar(String nombre, String contenido) {
-        if (nombre == null || contenido == null) {
-            return false;
-        }
-        if (!archivos.containsKey(nombre)) {
-            boolean creado = crear(nombre);
-            if (!creado) return false;
-        }
-        return escribir(nombre, contenido);
-    }
-
-    /**
-     * Elimina un archivo del disco y lo quita del indice.
-     *
-     * @param nombre nombre del archivo
-     * @return true si se elimino correctamente
-     */
-    public boolean eliminar(String nombre) {
-        if (nombre == null) return false;
-        if (!archivos.containsKey(nombre)) {
-            return false;   // no existe
-        }
-        archivos.remove(nombre);
-        indice.remove(nombre);
-        return true;
-    }
-
-    /* ==================== CONSULTAS ==================== */
-
-    /**
-     * @return la direccion simulada de un archivo, o -1 si no existe.
-     */
-    public int getDireccion(String nombre) {
-        Integer dir = indice.get(nombre);
-        return (dir != null) ? dir : -1;
-    }
-
-    /**
-     * @return el indice completo (vista de solo lectura).
-     */
-    public Map<String, Integer> getIndice() {
-        return Collections.unmodifiableMap(indice);
-    }
-
-    /**
-     * @return el mapa de archivos (vista de solo lectura).
-     */
-    public Map<String, String> getArchivos() {
-        return Collections.unmodifiableMap(archivos);
-    }
-
-    /** @return cantidad de archivos almacenados. */
     public int getCantidadArchivos() {
-        return archivos.size();
+        int contador = 0;
+        for (int i = 0; i < maxArchivos; i++) {
+            int entrada = inicioIndice + i * POSICIONES_POR_ENTRADA_INDICE;
+            if (posiciones[entrada] != null) {
+                contador++;
+            }
+        }
+        return contador;
     }
 
-    /** @return cantidad de posiciones totales del disco. */
+    /**
+     * @return lista de todas las entradas del índice (nombre, inicio, fin).
+     */
+    public List<String[]> getIndice() {
+        List<String[]> lista = new ArrayList<>();
+        for (int i = 0; i < maxArchivos; i++) {
+            int entrada = inicioIndice + i * POSICIONES_POR_ENTRADA_INDICE;
+            Object nombre = posiciones[entrada];
+            if (nombre != null) {
+                Object inicio = posiciones[entrada + 1];
+                Object fin = posiciones[entrada + 2];
+                lista.add(new String[]{
+                    nombre.toString(),
+                    inicio != null ? inicio.toString() : "-",
+                    fin != null ? fin.toString() : "-"
+                });
+            }
+        }
+        return lista;
+    }
+
+    private int buscarEntradaLibre() {
+        for (int i = 0; i < maxArchivos; i++) {
+            int entrada = inicioIndice + i * POSICIONES_POR_ENTRADA_INDICE;
+            if (posiciones[entrada] == null) {
+                return entrada;
+            }
+        }
+        return -1;
+    }
+
+    private int buscarEntradaPorNombre(String nombre) {
+        if (nombre == null) return -1;
+        for (int i = 0; i < maxArchivos; i++) {
+            int entrada = inicioIndice + i * POSICIONES_POR_ENTRADA_INDICE;
+            Object n = posiciones[entrada];
+            if (n != null && n.equals(nombre)) {
+                return entrada;
+            }
+        }
+        return -1;
+    }
+
+    /* ==================== ZONA 2: MEMORIA VIRTUAL (SWAP) ==================== */
+
+    /**
+     * Reserva un bloque de N posiciones consecutivas libres en la zona de swap.
+     *
+     * @param tamano cantidad de posiciones necesarias
+     * @return la dirección base del bloque, o -1 si no hay espacio
+     */
+    public int reservarBloqueSwap(int tamano) {
+        if (tamano <= 0 || tamano > tamanoSwap) return -1;
+        for (int inicio = inicioSwap; inicio <= inicioSwap + tamanoSwap - tamano; inicio++) {
+            boolean libre = true;
+            for (int i = 0; i < tamano; i++) {
+                if (posiciones[inicio + i] != null) {
+                    libre = false;
+                    break;
+                }
+            }
+            if (libre) return inicio;
+        }
+        return -1;
+    }
+
+    /**
+     * Escribe un bloque en la zona de swap.
+     */
+    public void escribirBloqueSwap(int direccionBase, Object[] valores) {
+        for (int i = 0; i < valores.length; i++) {
+            posiciones[direccionBase + i] = valores[i];
+        }
+    }
+
+    /**
+     * Lee un bloque de la zona de swap.
+     */
+    public Object[] leerBloqueSwap(int direccionBase, int tamano) {
+        Object[] valores = new Object[tamano];
+        for (int i = 0; i < tamano; i++) {
+            valores[i] = posiciones[direccionBase + i];
+        }
+        return valores;
+    }
+
+    /**
+     * Libera un bloque de la zona de swap.
+     */
+    public void liberarBloqueSwap(int direccionBase, int tamano) {
+        for (int i = 0; i < tamano; i++) {
+            posiciones[direccionBase + i] = null;
+        }
+    }
+
+    /**
+     * @return cantidad de posiciones libres en la zona de swap.
+     */
+    public int getEspacioSwapLibre() {
+        int contador = 0;
+        for (int i = 0; i < tamanoSwap; i++) {
+            if (posiciones[inicioSwap + i] == null) contador++;
+        }
+        return contador;
+    }
+
+    /**
+     * @return true si el swap está lleno.
+     */
+    public boolean swapEstaLleno() {
+        return getEspacioSwapLibre() == 0;
+    }
+
+    /* ==================== ZONA 3: ARCHIVOS ==================== */
+
+    /**
+     * Reserva un bloque de N posiciones consecutivas libres en la zona de archivos.
+     *
+     * @param tamano cantidad de posiciones necesarias
+     * @return la dirección base del bloque, o -1 si no hay espacio
+     */
+    public int reservarBloqueArchivo(int tamano) {
+        if (tamano <= 0) return -1;
+        int finZona = tamanoTotal;
+        for (int inicio = inicioArchivos; inicio <= finZona - tamano; inicio++) {
+            boolean libre = true;
+            for (int i = 0; i < tamano; i++) {
+                if (posiciones[inicio + i] != null) {
+                    libre = false;
+                    break;
+                }
+            }
+            if (libre) return inicio;
+        }
+        return -1;
+    }
+
+    /**
+     * Escribe un bloque de contenido en la zona de archivos.
+     */
+    public void escribirBloqueArchivo(int direccionBase, Object[] valores) {
+        for (int i = 0; i < valores.length; i++) {
+            posiciones[direccionBase + i] = valores[i];
+        }
+    }
+
+    /**
+     * Lee un bloque de la zona de archivos.
+     */
+    public Object[] leerBloqueArchivo(int direccionBase, int tamano) {
+        Object[] valores = new Object[tamano];
+        for (int i = 0; i < tamano; i++) {
+            valores[i] = posiciones[direccionBase + i];
+        }
+        return valores;
+    }
+
+    /**
+     * Libera un bloque de la zona de archivos.
+     */
+    public void liberarBloqueArchivo(int direccionBase, int tamano) {
+        for (int i = 0; i < tamano; i++) {
+            posiciones[direccionBase + i] = null;
+        }
+    }
+
+    /**
+     * @return cantidad de posiciones libres en la zona de archivos.
+     */
+    public int getEspacioArchivosLibre() {
+        int contador = 0;
+        int tamanoZona = tamanoTotal - inicioArchivos;
+        for (int i = 0; i < tamanoZona; i++) {
+            if (posiciones[inicioArchivos + i] == null) contador++;
+        }
+        return contador;
+    }
+
+    /* ==================== CONSULTAS GENERALES ==================== */
+
     public int getTamanoTotal() {
         return tamanoTotal;
     }
 
+    public int getMaxArchivos() {
+        return maxArchivos;
+    }
+
+    public int getTamanoSwap() {
+        return tamanoSwap;
+    }
+
+    public int getInicioIndice() {
+        return inicioIndice;
+    }
+
+    public int getInicioSwap() {
+        return inicioSwap;
+    }
+
+    public int getInicioArchivos() {
+        return inicioArchivos;
+    }
+
     /**
-     * @return porcentaje de uso del indice del disco (0-100).
+     * @return cantidad de posiciones ocupadas en el disco.
      */
-    public int getPorcentajeUso() {
-        if (MAX_ARCHIVOS == 0) return 0;
-        return (indice.size() * 100) / MAX_ARCHIVOS;
+    public int getEspacioOcupado() {
+        int contador = 0;
+        for (int i = 0; i < tamanoTotal; i++) {
+            if (posiciones[i] != null) contador++;
+        }
+        return contador;
+    }
+
+    /**
+     * @return porcentaje de uso del índice (0-100).
+     */
+    public int getPorcentajeUsoIndice() {
+        if (maxArchivos == 0) return 0;
+        return (getCantidadArchivos() * 100) / maxArchivos;
+    }
+
+    /**
+     * @return porcentaje de uso del swap (0-100).
+     */
+    public int getPorcentajeUsoSwap() {
+        if (tamanoSwap == 0) return 0;
+        int usadas = tamanoSwap - getEspacioSwapLibre();
+        return (usadas * 100) / tamanoSwap;
     }
 
     @Override
     public String toString() {
-        return "Disco[" + archivos.size() + " archivos, dir max="
-                + proximaDireccion + "/" + tamanoTotal + "]";
+        return "Disco[" + tamanoTotal + " pos, "
+                + getCantidadArchivos() + "/" + maxArchivos + " archivos, "
+                + "swap " + getEspacioSwapLibre() + "/" + tamanoSwap + " libres]";
     }
 }

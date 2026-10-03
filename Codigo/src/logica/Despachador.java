@@ -77,6 +77,14 @@ public class Despachador {
         if (ejecutorActual.isProgramaTerminado()) {
             return false;
         }
+
+        // Si el BCP está BLOCKED (esperando E/S a disco o input del usuario),
+        // NO ejecutar la siguiente instrucción. El GestorProcesos se encarga
+        // de decrementar el contador de tardanza.
+        if (ejecutorActual.getBcp().getEstado() == EstadoProceso.BLOCKED) {
+            return false;
+        }
+
         ejecutorActual.ejecutarSegundoDeCPU();
         return !ejecutorActual.isProgramaTerminado()
             && ejecutorActual.getBcp().getEstado() != EstadoProceso.BLOCKED;

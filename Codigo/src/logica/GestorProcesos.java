@@ -5,7 +5,6 @@ import modelo.CPU;
 import modelo.EstadoProceso;
 import modelo.Instruccion;
 import modelo.Memoria;
-import modelo.MemoriaVirtual;
 import modelo.Disco;
 
 import java.io.File;
@@ -15,42 +14,24 @@ import java.util.List;
 /**
  * Fachada de orquestación del ciclo de vida y ejecución de procesos.
  *
- * Responsabilidades:
- *   - Cargar archivos .asm y convertirlos en procesos.
- *   - Gestionar el ciclo de vida (crear, ejecutar, bloquear, terminar).
- *   - Manejar swap in/out cuando no hay partición libre o kernel lleno.
- *   - Exponer consultas para la GUI.
- *
- * Modelo de swap (según el profe):
- *   - El BCP NUNCA se mueve de memoria principal.
- *   - Solo las INSTRUCCIONES van a swap cuando no hay partición libre.
- *   - Un proceso en swap está en estado NEW.
- *   - Cuando entra a memoria, se le crea el BCP y pasa a READY.
- *
- * Máximo: 5 BCPs en kernel. Los demás esperan en swap (NEW).
- *
  * FCFS puro no apropiativo estricto:
  *   - Si un proceso se bloquea por INT 09H (input), la CPU queda
  *     idle hasta que se desbloquee. NO se ejecuta otro proceso.
  *   - Si un proceso se bloquea por INT 21H (E/S a disco), se simula
- *     una tardanza de N segundos. El proceso sigue siendo el actual
- *     (la CPU espera). Cuando el disco "responde", vuelve a RUNNING.
+ *     una tardanza de N segundos. El proceso sigue siendo el actual.
  */
 public class GestorProcesos {
 
-    /** Máximo de BCPs permitidos en memoria principal (restricción del enunciado). */
     public static final int MAX_PROCESOS = 5;
 
-    /** Tardanza simulada del disco según la operación AH de INT 21H. */
-    private static final int TARDANZA_CREAR     = 1;   // AH=3Ch
-    private static final int TARDANZA_ABRIR     = 1;   // AH=3Dh
-    private static final int TARDANZA_LEER      = 2;   // AH=4Dh
-    private static final int TARDANZA_ESCRIBIR  = 2;   // AH=40h
-    private static final int TARDANZA_ELIMINAR  = 1;   // AH=41h
+    private static final int TARDANZA_CREAR     = 1;
+    private static final int TARDANZA_ABRIR     = 1;
+    private static final int TARDANZA_LEER      = 2;
+    private static final int TARDANZA_ESCRIBIR  = 2;
+    private static final int TARDANZA_ELIMINAR  = 1;
     private static final int TARDANZA_DEFAULT   = 1;
 
     private Memoria memoria;
-    private MemoriaVirtual memoriaVirtual;
     private CPU cpu;
     private ListaDeTrabajos listaDeTrabajos;
     private Planificador planificador;
@@ -62,21 +43,16 @@ public class GestorProcesos {
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueadosIO;
     private List<BCP> procesosBloqueadosInput;
-
-    /** Callback de salida a pantalla (INT 10H y mensajes del gestor). */
-    private java.util.function.Consumer<String> salidaPantalla;
-
-    /** Tabla del SO: procesos suspendidos y dónde viven en swap. */
     private List<ProcesoEnEspera> procesosSuspendidos;
 
+    private java.util.function.Consumer<String> salidaPantalla;
+
     public GestorProcesos(Memoria memoria,
-                          MemoriaVirtual memoriaVirtual,
                           CPU cpu,
                           ListaDeTrabajos listaDeTrabajos,
                           ParticionadorFijo particionador,
                           Disco disco) {
         this.memoria = memoria;
-        this.memoriaVirtual = memoriaVirtual;
         this.cpu = cpu;
         this.listaDeTrabajos = listaDeTrabajos;
         this.particionador = particionador;
@@ -108,7 +84,6 @@ public class GestorProcesos {
                 + "pero cada partición solo admite " + particionador.getTamanoParticion());
         }
 
-        // 1. ¿Hay partición libre Y espacio en kernel?
         int indice = particionador.asignarParticion();
         if (indice != -1) {
             BCP bcp = crearProcesoEnParticion(instrucciones, indice);
@@ -118,38 +93,36 @@ public class GestorProcesos {
             particionador.liberarParticion(indice);
         }
 
-        // 2. No cabe en memoria: intentar swap (NEW)
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
             return resultadoSwap;
         }
 
-        // 3. No hay ni kernel, ni partición, ni swap
         return ResultadoCarga.error(
             "No hay espacio en memoria principal (ni kernel ni partición), "
-            + "y la memoria virtual está llena.\n"
-            + "Libera espacio o aumenta la memoria en 'Configurar'.");
+            + "y la memoria virtual del disco está llena.\n"
+            + "Libera espacio o aumenta el disco en 'Configurar'.");
     }
 
     private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones) {
         int tamanoInstrucciones = instrucciones.size();
 
-        if (memoriaVirtual.getEspacioLibre() < tamanoInstrucciones) {
+        if (disco.getEspacioSwapLibre() < tamanoInstrucciones) {
             return ResultadoCarga.error(
-                "La memoria virtual no tiene espacio para las instrucciones.\n"
+                "La memoria virtual del disco no tiene espacio.\n"
                 + "Necesario: " + tamanoInstrucciones + " posiciones, "
-                + "libre: " + memoriaVirtual.getEspacioLibre() + ".");
+                + "libre: " + disco.getEspacioSwapLibre() + ".");
         }
 
-        int dirSwap = memoriaVirtual.reservarBloque(tamanoInstrucciones);
+        int dirSwap = disco.reservarBloqueSwap(tamanoInstrucciones);
         if (dirSwap == -1) {
-            return ResultadoCarga.error("No hay bloque contiguo libre en la memoria virtual.");
+            return ResultadoCarga.error("No hay bloque contiguo libre en el swap del disco.");
         }
 
         int id = siguienteId++;
 
         Object[] instruccionesArr = instrucciones.toArray();
-        memoriaVirtual.escribirBloque(dirSwap, instruccionesArr);
+        disco.escribirBloqueSwap(dirSwap, instruccionesArr);
 
         ProcesoEnEspera pe = new ProcesoEnEspera(
                 id, EstadoProceso.NEW, tamanoInstrucciones);
@@ -157,7 +130,7 @@ public class GestorProcesos {
         procesosSuspendidos.add(pe);
 
         System.out.println("[SWAP] Proceso " + id
-                + " en NEW (swap, dir=" + dirSwap
+                + " en NEW (swap disco, dir=" + dirSwap
                 + ", instrucciones=" + tamanoInstrucciones + ")");
 
         return ResultadoCarga.enEspera();
@@ -237,9 +210,6 @@ public class GestorProcesos {
             despachador.limpiarEjecutor();
         } else if (estado == EstadoProceso.BLOCKED) {
             if (fueBloqueoIO(actual)) {
-                // INT 21H: E/S a disco. El proceso sigue siendo el actual.
-                // Se le asigna una tardanza simulada. El contador se decrementa
-                // en los siguientes ejecutarUnPaso().
                 int tardanza = calcularTardanzaDisco(actual);
                 actual.setPesoPendiente(tardanza);
 
@@ -247,7 +217,6 @@ public class GestorProcesos {
                         + " BLOCKED por IO en: " + leerInstruccionActual(actual)
                         + " (tardanza=" + tardanza + "s)");
             } else {
-                // INT 09H: input del usuario.
                 System.out.println("[FCFS] Proceso " + actual.getId()
                         + " BLOCKED en: " + leerInstruccionActual(actual)
                         + " esperando input");
@@ -262,12 +231,6 @@ public class GestorProcesos {
         return true;
     }
 
-    /**
-     * Calcula la tardanza simulada del disco según la operación AH.
-     *
-     * @param bcp BCP del proceso (se lee el registro AH)
-     * @return segundos de tardanza
-     */
     private int calcularTardanzaDisco(BCP bcp) {
         int ah = bcp.getAh();
         switch (ah) {
@@ -280,9 +243,6 @@ public class GestorProcesos {
         }
     }
 
-    /**
-     * Lee la instrucción que está en la dirección actual del IR del BCP.
-     */
     private String leerInstruccionActual(BCP bcp) {
         int ir = bcp.getIr();
         if (ir < 0) {
@@ -310,14 +270,6 @@ public class GestorProcesos {
         return instr.getCodigoInterrupcion(0) == 0x21;
     }
 
-    /**
-     * Ejecuta todos los procesos en modo automático.
-     *
-     * Cada paso dura 1 segundo real (Thread.sleep).
-     * Si hay procesos esperando input, se pausa (el tiempo sigue contando).
-     * Si hay un proceso esperando al disco (INT 21H), también se respeta
-     * la tardanza (cada paso decrementa el contador).
-     */
     public int ejecutarAutomatico(Runnable onPaso) {
         int pasos = 0;
         while (hayProcesosActivos()) {
@@ -408,9 +360,9 @@ public class GestorProcesos {
         int dirSwap = pe.getDireccionBaseEnSwap();
         int tamanoInstrucciones = pe.getTamanoEnSwap();
 
-        Object[] instruccionesArr = memoriaVirtual.leerBloque(dirSwap, tamanoInstrucciones);
+        Object[] instruccionesArr = disco.leerBloqueSwap(dirSwap, tamanoInstrucciones);
 
-        memoriaVirtual.liberarBloque(dirSwap, tamanoInstrucciones);
+        disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
         procesosSuspendidos.remove(0);
 
         List<Instruccion> instrucciones = new ArrayList<>();
@@ -474,7 +426,25 @@ public class GestorProcesos {
         return getTotalProcesosActivos() + procesosSuspendidos.size();
     }
 
+    /**
+     * ¿Hay procesos activos?
+     *
+     * Considera:
+     *   - Procesos en la lista de trabajos.
+     *   - Proceso en CPU (RUNNING).
+     *   - Procesos bloqueados por IO o input.
+     *   - Proceso BLOCKED esperando al disco (INT 21H con tardanza).
+     */
     public boolean hayProcesosActivos() {
+        // Proceso BLOCKED esperando al disco (INT 21H con tardanza)
+        if (despachador.getEjecutorActual() != null) {
+            BCP b = despachador.getEjecutorActual().getBcp();
+            if (b.getEstado() == EstadoProceso.BLOCKED
+                    && b.getPesoPendiente() > 0) {
+                return true;
+            }
+        }
+
         return !listaDeTrabajos.estaVacia()
             || despachador.procesoActualOcupaCPU()
             || !procesosBloqueadosIO.isEmpty()
@@ -528,8 +498,8 @@ public class GestorProcesos {
         return new ArrayList<>(procesosSuspendidos);
     }
 
-    public MemoriaVirtual getMemoriaVirtual() {
-        return memoriaVirtual;
+    public Disco getDisco() {
+        return disco;
     }
 
     /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */

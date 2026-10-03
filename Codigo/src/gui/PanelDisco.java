@@ -3,6 +3,7 @@ package gui;
 import modelo.Disco;
 
 import javax.swing.JPanel;
+import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JScrollPane;
 import javax.swing.JButton;
@@ -24,21 +25,40 @@ import java.util.List;
 /**
  * Panel que muestra el contenido del disco.
  *
- * Arriba: barra de progreso con el porcentaje de uso del indice.
- * Centro: tabla con el indice de archivos.
- * Abajo: boton toggle "Mostrar solo ocupadas / Mostrar todas".
+ * El disco tiene 3 zonas (según el profe):
+ *   1. Índice de archivos (nombre, inicio, fin)
+ *   2. Memoria virtual (swap)
+ *   3. Archivos
+ *
+ * Arriba: barra de uso TOTAL del disco.
+ * Centro: pestañas con cada zona.
+ * La columna "Pos" siempre muestra la posición REAL del disco.
  */
 public class PanelDisco extends JPanel {
 
-    private JTable tabla;
-    private DefaultTableModel modelo;
-    private JButton btnToggle;
-    private JProgressBar barraUso;
-    private JLabel lblUso;
-    private boolean mostrarSoloOcupadas = false;
+    private JTabbedPane tabs;
 
-    private List<String[]> entradas;
-    private int tamanoTotal = 512;
+    // Barra de uso TOTAL (arriba)
+    private JProgressBar barraUsoTotal;
+    private JLabel lblUsoTotal;
+
+    // ==== Pestaña 1: Índice ====
+    private JTable tablaIndice;
+    private DefaultTableModel modeloIndice;
+
+    // ==== Pestaña 2: Memoria Virtual ====
+    private JTable tablaSwap;
+    private DefaultTableModel modeloSwap;
+    private JButton btnToggleSwap;
+    private boolean mostrarSoloOcupadasSwap = false;
+
+    // ==== Pestaña 3: Archivos ====
+    private JTable tablaArchivos;
+    private DefaultTableModel modeloArchivos;
+    private JButton btnToggleArchivos;
+    private boolean mostrarSoloOcupadasArchivos = false;
+
+    private Disco discoActual;
 
     public PanelDisco() {
         construirInterfaz();
@@ -50,7 +70,7 @@ public class PanelDisco extends JPanel {
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createTitledBorder(
                         BorderFactory.createLineBorder(Paleta.MORADO_ACENTO, 2),
-                        "Valor en disco",
+                        "Disco",
                         TitledBorder.DEFAULT_JUSTIFICATION,
                         TitledBorder.DEFAULT_POSITION,
                         Paleta.FUENTE_TITULO_PANEL,
@@ -59,37 +79,135 @@ public class PanelDisco extends JPanel {
                 new EmptyBorder(5, 5, 5, 5)
         ));
 
-        // === Arriba: barra de uso ===
+        // ==== Arriba: barra de uso TOTAL del disco ====
         JPanel panelUso = new JPanel(new BorderLayout(5, 2));
         panelUso.setOpaque(false);
 
-        barraUso = new JProgressBar(0, 100);
-        barraUso.setStringPainted(true);
-        barraUso.setForeground(Paleta.MORADO_ACENTO);
-        barraUso.setBackground(new Color(0xE0, 0xE0, 0xE0));
-        barraUso.setFont(Paleta.FUENTE_LABEL_BOLD);
-        barraUso.setPreferredSize(new Dimension(0, 22));
-        barraUso.setValue(0);
-        barraUso.setString("0%");
+        barraUsoTotal = new JProgressBar(0, 100);
+        barraUsoTotal.setStringPainted(true);
+        barraUsoTotal.setForeground(Paleta.MORADO_ACENTO);
+        barraUsoTotal.setBackground(new Color(0xE0, 0xE0, 0xE0));
+        barraUsoTotal.setFont(Paleta.FUENTE_LABEL_BOLD);
+        barraUsoTotal.setPreferredSize(new Dimension(0, 22));
+        barraUsoTotal.setValue(0);
+        barraUsoTotal.setString("0%");
 
-        lblUso = new JLabel("0 / 0 archivos");
-        lblUso.setFont(Paleta.FUENTE_LABEL);
-        lblUso.setForeground(Paleta.TEXTO_NORMAL);
+        lblUsoTotal = new JLabel("0 / 0 posiciones usadas del disco");
+        lblUsoTotal.setFont(Paleta.FUENTE_LABEL);
+        lblUsoTotal.setForeground(Paleta.TEXTO_NORMAL);
 
-        panelUso.add(barraUso, BorderLayout.CENTER);
-        panelUso.add(lblUso, BorderLayout.SOUTH);
+        panelUso.add(barraUsoTotal, BorderLayout.CENTER);
+        panelUso.add(lblUsoTotal, BorderLayout.SOUTH);
 
         add(panelUso, BorderLayout.NORTH);
 
-        // === Centro: tabla ===
-        modelo = new DefaultTableModel(new Object[]{"Pos", "Valor"}, 0) {
+        // ==== Centro: pestañas ====
+        tabs = new JTabbedPane();
+        tabs.setFont(Paleta.FUENTE_LABEL_BOLD);
+
+        tabs.addTab("Índice", crearPanelIndice());
+        tabs.addTab("Memoria Virtual", crearPanelSwap());
+        tabs.addTab("Archivos", crearPanelArchivos());
+
+        add(tabs, BorderLayout.CENTER);
+    }
+
+    /* ==================== PESTAÑA 1: ÍNDICE ==================== */
+
+    private JPanel crearPanelIndice() {
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setOpaque(false);
+
+        modeloIndice = new DefaultTableModel(
+                new Object[]{"Pos", "Nombre", "Inicio", "Fin"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
 
-        tabla = new JTable(modelo);
+        tablaIndice = crearTabla(modeloIndice);
+        panel.add(new JScrollPane(tablaIndice), BorderLayout.CENTER);
+
+        return panel;
+    }
+
+    /* ==================== PESTAÑA 2: MEMORIA VIRTUAL ==================== */
+
+    private JPanel crearPanelSwap() {
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setOpaque(false);
+
+        modeloSwap = new DefaultTableModel(new Object[]{"Pos", "Contenido"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        tablaSwap = crearTabla(modeloSwap);
+        panel.add(new JScrollPane(tablaSwap), BorderLayout.CENTER);
+
+        btnToggleSwap = new JButton("Mostrar solo ocupadas");
+        btnToggleSwap.setFont(Paleta.FUENTE_BOTON);
+        btnToggleSwap.setBackground(Paleta.MORADO_ACENTO);
+        btnToggleSwap.setForeground(Paleta.TEXTO_CLARO);
+        btnToggleSwap.setFocusPainted(false);
+        btnToggleSwap.addActionListener(e -> {
+            mostrarSoloOcupadasSwap = !mostrarSoloOcupadasSwap;
+            btnToggleSwap.setText(mostrarSoloOcupadasSwap
+                    ? "Mostrar todas" : "Mostrar solo ocupadas");
+            refrescarSwap();
+        });
+
+        JPanel panelBoton = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        panelBoton.setOpaque(false);
+        panelBoton.add(btnToggleSwap);
+        panel.add(panelBoton, BorderLayout.SOUTH);
+
+        return panel;
+    }
+
+    /* ==================== PESTAÑA 3: ARCHIVOS ==================== */
+
+    private JPanel crearPanelArchivos() {
+        JPanel panel = new JPanel(new BorderLayout(5, 5));
+        panel.setOpaque(false);
+
+        modeloArchivos = new DefaultTableModel(new Object[]{"Pos", "Contenido"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        tablaArchivos = crearTabla(modeloArchivos);
+        panel.add(new JScrollPane(tablaArchivos), BorderLayout.CENTER);
+
+        btnToggleArchivos = new JButton("Mostrar solo ocupadas");
+        btnToggleArchivos.setFont(Paleta.FUENTE_BOTON);
+        btnToggleArchivos.setBackground(Paleta.MORADO_ACENTO);
+        btnToggleArchivos.setForeground(Paleta.TEXTO_CLARO);
+        btnToggleArchivos.setFocusPainted(false);
+        btnToggleArchivos.addActionListener(e -> {
+            mostrarSoloOcupadasArchivos = !mostrarSoloOcupadasArchivos;
+            btnToggleArchivos.setText(mostrarSoloOcupadasArchivos
+                    ? "Mostrar todas" : "Mostrar solo ocupadas");
+            refrescarArchivos();
+        });
+
+        JPanel panelBoton = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        panelBoton.setOpaque(false);
+        panelBoton.add(btnToggleArchivos);
+        panel.add(panelBoton, BorderLayout.SOUTH);
+
+        return panel;
+    }
+
+    /* ==================== TABLA GENÉRICA ==================== */
+
+    private JTable crearTabla(DefaultTableModel modelo) {
+        JTable tabla = new JTable(modelo);
         tabla.setFont(Paleta.FUENTE_MONO);
         tabla.setRowHeight(22);
         tabla.setGridColor(new Color(0xE0, 0xE0, 0xE0));
@@ -103,69 +221,106 @@ public class PanelDisco extends JPanel {
                     boolean isSelected, boolean hasFocus, int row, int column) {
                 Component c = super.getTableCellRendererComponent(
                         table, value, isSelected, hasFocus, row, column);
-                if (!isSelected) {
-                    c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
-                }
+                if (isSelected) return c;
+                c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+                c.setForeground(Paleta.TEXTO_NORMAL);
+                setFont(Paleta.FUENTE_MONO);
                 return c;
             }
         });
 
-        JScrollPane scroll = new JScrollPane(tabla);
-        add(scroll, BorderLayout.CENTER);
-
-        // === Abajo: boton toggle ===
-        btnToggle = new JButton("Mostrar solo ocupadas");
-        btnToggle.setFont(Paleta.FUENTE_BOTON);
-        btnToggle.setBackground(Paleta.MORADO_ACENTO);
-        btnToggle.setForeground(Paleta.TEXTO_CLARO);
-        btnToggle.setFocusPainted(false);
-        btnToggle.addActionListener(e -> {
-            mostrarSoloOcupadas = !mostrarSoloOcupadas;
-            btnToggle.setText(mostrarSoloOcupadas
-                    ? "Mostrar todas" : "Mostrar solo ocupadas");
-            refrescar();
-        });
-
-        JPanel panelBoton = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        panelBoton.setOpaque(false);
-        panelBoton.add(btnToggle);
-        add(panelBoton, BorderLayout.SOUTH);
+        return tabla;
     }
 
-    public void actualizar(List<String[]> indice, int tamanoTotal) {
-        this.entradas = indice;
-        this.tamanoTotal = tamanoTotal;
-        refrescar();
-        actualizarBarra();
+    /* ==================== ACTUALIZACIÓN ==================== */
+
+    /**
+     * Actualiza la barra total y las 3 pestañas con el contenido del disco.
+     */
+    public void actualizar(Disco disco) {
+        this.discoActual = disco;
+        refrescarUsoTotal();
+        refrescarIndice();
+        refrescarSwap();
+        refrescarArchivos();
     }
 
-    private void refrescar() {
-        modelo.setRowCount(0);
+    /* ==================== USO TOTAL ==================== */
 
-        if (entradas == null) {
+    private void refrescarUsoTotal() {
+        if (discoActual == null) {
+            barraUsoTotal.setValue(0);
+            barraUsoTotal.setString("0%");
+            lblUsoTotal.setText("0 / 0 posiciones usadas del disco");
             return;
         }
 
-        for (int i = 0; i < entradas.size(); i++) {
-            String[] entrada = entradas.get(i);
-            String nombre = entrada[0];
-            String direccion = entrada[1];
-            modelo.addRow(new Object[]{i, nombre + "  ->  " + direccion});
-        }
+        int total = discoActual.getTamanoTotal();
+        int usadas = discoActual.getEspacioOcupado();
+        int porcentaje = (total > 0) ? (usadas * 100) / total : 0;
 
-        if (!mostrarSoloOcupadas) {
-            for (int i = entradas.size(); i < tamanoTotal; i++) {
-                modelo.addRow(new Object[]{i, "(vacio)"});
+        barraUsoTotal.setValue(porcentaje);
+        barraUsoTotal.setString(porcentaje + "%");
+        lblUsoTotal.setText(usadas + " / " + total + " posiciones usadas del disco");
+    }
+
+    /* ==================== ÍNDICE ==================== */
+
+    private void refrescarIndice() {
+        modeloIndice.setRowCount(0);
+        if (discoActual == null) return;
+
+        List<String[]> entradas = discoActual.getIndice();
+        int maxArchivos = discoActual.getMaxArchivos();
+        int posicionIndice = discoActual.getInicioIndice();
+
+        for (int i = 0; i < maxArchivos; i++) {
+            int posReal = posicionIndice + (i * 3);
+            if (i < entradas.size()) {
+                String[] e = entradas.get(i);
+                modeloIndice.addRow(new Object[]{
+                    posReal,
+                    e[0] + "  ->  " + e[1] + ".." + e[2],
+                    e[1],
+                    e[2]
+                });
+            } else {
+                modeloIndice.addRow(new Object[]{posReal, "(vacio)", "-", "-"});
             }
         }
     }
 
-    private void actualizarBarra() {
-        int usadas = (entradas != null) ? entradas.size() : 0;
-        int maxArchivos = Disco.MAX_ARCHIVOS;
-        int porcentaje = (maxArchivos > 0) ? (usadas * 100) / maxArchivos : 0;
-        barraUso.setValue(porcentaje);
-        barraUso.setString(porcentaje + "%");
-        lblUso.setText(usadas + " / " + maxArchivos + " archivos");
+    /* ==================== SWAP ==================== */
+
+    private void refrescarSwap() {
+        modeloSwap.setRowCount(0);
+        if (discoActual == null) return;
+
+        int inicio = discoActual.getInicioSwap();
+        int fin = discoActual.getInicioArchivos();
+
+        for (int i = inicio; i < fin; i++) {
+            Object contenido = discoActual.leer(i);
+            if (mostrarSoloOcupadasSwap && contenido == null) continue;
+            String valor = (contenido == null) ? "(vacio)" : contenido.toString();
+            modeloSwap.addRow(new Object[]{i, valor});
+        }
+    }
+
+    /* ==================== ARCHIVOS ==================== */
+
+    private void refrescarArchivos() {
+        modeloArchivos.setRowCount(0);
+        if (discoActual == null) return;
+
+        int inicio = discoActual.getInicioArchivos();
+        int fin = discoActual.getTamanoTotal();
+
+        for (int i = inicio; i < fin; i++) {
+            Object contenido = discoActual.leer(i);
+            if (mostrarSoloOcupadasArchivos && contenido == null) continue;
+            String valor = (contenido == null) ? "(vacio)" : contenido.toString();
+            modeloArchivos.addRow(new Object[]{i, valor});
+        }
     }
 }

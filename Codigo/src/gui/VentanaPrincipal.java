@@ -1,5 +1,6 @@
 package gui;
 
+import config.ConfiguracionExterna;
 import logica.GestorProcesos;
 import logica.ListaDeTrabajos;
 import logica.ParticionadorFijo;
@@ -8,7 +9,6 @@ import logica.BCPTerminado;
 import modelo.BCP;
 import modelo.CPU;
 import modelo.Memoria;
-import modelo.MemoriaVirtual;
 import modelo.Disco;
 
 import javax.swing.JFrame;
@@ -33,24 +33,22 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
 
 public class VentanaPrincipal extends JFrame {
 
-    private static final int TAMANO_MEMORIA_DEFAULT = 256;
-    private static final int LIMITE_KERNEL_DEFAULT = (int) Math.ceil(TAMANO_MEMORIA_DEFAULT * 0.20);
-    private static final int MAX_PROCESOS_DEFAULT = 5;
-    private static final int TAMANO_DISCO_DEFAULT = 512;
-    private static final int TAMANO_MEMORIA_VIRTUAL_DEFAULT = 64;
+    // Configuracion externa (config.txt)
+    private ConfiguracionExterna config;
 
-    private int tamanoMemoriaActual = TAMANO_MEMORIA_DEFAULT;
-    private int limiteKernelActual = LIMITE_KERNEL_DEFAULT;
-    private int tamanoDiscoActual = TAMANO_DISCO_DEFAULT;
-    private int tamanoMemoriaVirtualActual = TAMANO_MEMORIA_VIRTUAL_DEFAULT;
+    // Valores actuales (cargados de config.txt)
+    private int tamanoMemoriaActual;
+    private int limiteKernelActual;
+    private int maxProcesosActual;
+    private int tamanoDiscoActual;
+    private int maxArchivosActual;
+    private int tamanoSwapActual;
 
     private Memoria memoria;
-    private MemoriaVirtual memoriaVirtual;
     private CPU cpu;
     private ListaDeTrabajos listaDeTrabajos;
     private ParticionadorFijo particionador;
@@ -59,7 +57,6 @@ public class VentanaPrincipal extends JFrame {
 
     private PanelProcesos panelProcesos;
     private PanelMemoria panelMemoria;
-    private PanelMemoriaVirtual panelMemoriaVirtual;
     private PanelDisco panelDisco;
     private PanelPantalla panelPantalla;
 
@@ -70,18 +67,23 @@ public class VentanaPrincipal extends JFrame {
     private JButton btnLimpiar;
     private JButton btnEstadisticas;
 
-    /** Worker del modo automático (corre en hilo aparte). */
     private SwingWorker<Integer, Void> workerAutomatico;
 
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
+
+        // 1. Cargar configuracion externa ANTES de inicializar
+        config = new ConfiguracionExterna();
+        config.cargar();
+        aplicarConfiguracion(config);
+
+        // 2. Configurar la ventana
         aplicarLookAndFeel();
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1400, 900);
         setMinimumSize(new Dimension(1200, 700));
         setLocationRelativeTo(null);
 
-        // Cancelar el worker si se cierra la ventana
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -94,6 +96,33 @@ public class VentanaPrincipal extends JFrame {
         inicializarSistema();
         inicializarComponentes();
         refrescarTodo();
+
+        // 3. Avisar si hubo correcciones en config.txt
+        //    (después de que la ventana ya esté armada)
+        if (config.huboCorrecciones()) {
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                JOptionPane.showMessageDialog(this,
+                        "Se encontraron valores invalidos en config.txt\n"
+                        + "y se corrigieron automaticamente:\n\n"
+                        + config.getMensajesCorrecciones()
+                        + "\nEl archivo config.txt fue actualizado.",
+                        "Configuracion corregida",
+                        JOptionPane.WARNING_MESSAGE);
+            });
+        }
+    }
+
+    /**
+     * Aplica los valores de la configuracion externa a las variables
+     * de instancia.
+     */
+    private void aplicarConfiguracion(ConfiguracionExterna config) {
+        this.tamanoMemoriaActual = config.getMemoria();
+        this.limiteKernelActual = config.getKernel();
+        this.maxProcesosActual = config.getMaxProcesos();
+        this.tamanoDiscoActual = config.getDisco();
+        this.maxArchivosActual = config.getMaxArchivos();
+        this.tamanoSwapActual = config.getMemoriaVirtual();
     }
 
     private void aplicarLookAndFeel() {
@@ -111,15 +140,14 @@ public class VentanaPrincipal extends JFrame {
 
     private void inicializarSistema() {
         memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual);
-        memoriaVirtual = new MemoriaVirtual(tamanoMemoriaVirtualActual);
         cpu = new CPU(limiteKernelActual);
-        disco = new Disco(tamanoDiscoActual);
+        disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorFijo(
                 limiteKernelActual,
                 memoria.getEspacioUsuarioDisponible(),
-                MAX_PROCESOS_DEFAULT);
-        gestor = new GestorProcesos(memoria, memoriaVirtual, cpu,
+                maxProcesosActual);
+        gestor = new GestorProcesos(memoria, cpu,
                                     listaDeTrabajos, particionador, disco);
     }
 
@@ -131,17 +159,15 @@ public class VentanaPrincipal extends JFrame {
 
         mainPanel.add(crearEncabezado(), BorderLayout.NORTH);
 
-        JPanel centro = new JPanel(new GridLayout(1, 4, 10, 10));
+        JPanel centro = new JPanel(new GridLayout(1, 3, 10, 10));
         centro.setOpaque(false);
 
         panelProcesos = new PanelProcesos();
         panelMemoria = new PanelMemoria();
-        panelMemoriaVirtual = new PanelMemoriaVirtual();
         panelDisco = new PanelDisco();
 
         centro.add(panelProcesos);
         centro.add(panelMemoria);
-        centro.add(panelMemoriaVirtual);
         centro.add(panelDisco);
         mainPanel.add(centro, BorderLayout.CENTER);
 
@@ -278,7 +304,7 @@ public class VentanaPrincipal extends JFrame {
                 try {
                     String contenidoAsm = new String(
                             java.nio.file.Files.readAllBytes(archivo.toPath()));
-                    disco.guardar(archivo.getName(), contenidoAsm);
+                    guardarAsmEnDisco(archivo.getName(), contenidoAsm);
                 } catch (Exception ex) {
                     panelPantalla.agregarMensaje(">> [ADVERTENCIA] No se pudo guardar el .asm: "
                             + ex.getMessage());
@@ -298,6 +324,44 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
+    private void guardarAsmEnDisco(String nombre, String contenido) {
+        if (disco.existe(nombre)) {
+            int inicio = disco.getInicioArchivo(nombre);
+            if (inicio != -1) {
+                String[] lineas = contenido.split("\\R");
+                int i = 0;
+                for (String linea : lineas) {
+                    if (linea.trim().isEmpty()) continue;
+                    disco.escribir(inicio + i, linea.trim());
+                    i++;
+                }
+            }
+            return;
+        }
+
+        String[] lineas = contenido.split("\\R");
+        int cantidadLineas = 0;
+        for (String linea : lineas) {
+            if (!linea.trim().isEmpty()) cantidadLineas++;
+        }
+
+        int inicio = disco.reservarBloqueArchivo(cantidadLineas);
+        if (inicio == -1) {
+            panelPantalla.agregarMensaje(">> [ADVERTENCIA] Sin espacio en disco para " + nombre);
+            return;
+        }
+
+        int i = 0;
+        for (String linea : lineas) {
+            if (linea.trim().isEmpty()) continue;
+            disco.escribir(inicio + i, linea.trim());
+            i++;
+        }
+        int fin = inicio + cantidadLineas - 1;
+
+        disco.registrarArchivo(nombre, inicio, fin);
+    }
+
     private void ejecutarUnPaso() {
         if (!gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
@@ -307,13 +371,6 @@ public class VentanaPrincipal extends JFrame {
         if (gestor.ejecutarUnPaso()) refrescarTodo();
     }
 
-    /**
-     * Ejecuta todos los procesos en modo automático.
-     *
-     * Corre en un SwingWorker (hilo aparte), respetando 1 segundo real
-     * por paso. Si hay procesos esperando input, el worker se pausa y
-     * el tiempo sigue contando hasta que el usuario ingrese un valor.
-     */
     private void ejecutarAutomatico() {
         if (!gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
@@ -327,14 +384,12 @@ public class VentanaPrincipal extends JFrame {
             @Override
             protected Integer doInBackground() throws Exception {
                 return gestor.ejecutarAutomatico(() -> {
-                    // Notificar a la GUI desde el hilo del worker
                     publish((Void) null);
                 });
             }
 
             @Override
             protected void process(List<Void> chunks) {
-                // Se ejecuta en el hilo de Swing
                 refrescarTodo();
             }
 
@@ -388,8 +443,9 @@ public class VentanaPrincipal extends JFrame {
                 this,
                 tamanoMemoriaActual,
                 limiteKernelActual,
-                tamanoMemoriaVirtualActual,
-                tamanoDiscoActual);
+                tamanoDiscoActual,
+                maxArchivosActual,
+                tamanoSwapActual);
 
         dialogo.setVisible(true);
 
@@ -397,24 +453,35 @@ public class VentanaPrincipal extends JFrame {
 
         int nuevoTamano = dialogo.getTamanoMemoria();
         int nuevoLimite = dialogo.getLimiteKernel();
-        int nuevoMemVirtual = dialogo.getTamanoMemoriaVirtual();
         int nuevoDisco  = dialogo.getTamanoDisco();
+        int nuevoMaxArchivos = dialogo.getMaxArchivos();
+        int nuevoSwap   = dialogo.getTamanoSwap();
 
+        // Actualizar variables de instancia
         this.tamanoMemoriaActual = nuevoTamano;
         this.limiteKernelActual = nuevoLimite;
-        this.tamanoMemoriaVirtualActual = nuevoMemVirtual;
         this.tamanoDiscoActual = nuevoDisco;
+        this.maxArchivosActual = nuevoMaxArchivos;
+        this.tamanoSwapActual = nuevoSwap;
 
+        // Actualizar config y guardar en config.txt
+        config.setMemoria(nuevoTamano);
+        config.setKernel(nuevoLimite);
+        config.setDisco(nuevoDisco);
+        config.setMaxArchivos(nuevoMaxArchivos);
+        config.setMemoriaVirtual(nuevoSwap);
+        config.guardar();
+
+        // Recrear componentes
         memoria = new Memoria(nuevoTamano, nuevoLimite);
-        memoriaVirtual = new MemoriaVirtual(nuevoMemVirtual);
         cpu = new CPU(nuevoLimite);
-        disco = new Disco(nuevoDisco);
+        disco = new Disco(nuevoDisco, nuevoMaxArchivos, nuevoSwap);
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorFijo(
                 nuevoLimite,
                 memoria.getEspacioUsuarioDisponible(),
-                MAX_PROCESOS_DEFAULT);
-        gestor = new GestorProcesos(memoria, memoriaVirtual, cpu,
+                maxProcesosActual);
+        gestor = new GestorProcesos(memoria, cpu,
                                     listaDeTrabajos, particionador, disco);
 
         configurarCallbacks();
@@ -438,9 +505,15 @@ public class VentanaPrincipal extends JFrame {
         panelPantalla.agregarMensaje(">>   Memoria: " + tamanoMemoriaActual + " posiciones");
         panelPantalla.agregarMensaje(">>   Kernel: 0-" + (limiteKernelActual - 1)
                 + ", Usuario: " + limiteKernelActual + "-" + (tamanoMemoriaActual - 1));
-        panelPantalla.agregarMensaje(">>   Memoria virtual: " + tamanoMemoriaVirtualActual
-                + " posiciones");
-        panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual + " posiciones");
+        panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual
+                + " posiciones (maxArchivos=" + maxArchivosActual
+                + ", swap=" + tamanoSwapActual + ")");
+        panelPantalla.agregarMensaje(">>     Indice: " + disco.getInicioIndice()
+                + "-" + (disco.getInicioSwap() - 1));
+        panelPantalla.agregarMensaje(">>     Swap: " + disco.getInicioSwap()
+                + "-" + (disco.getInicioArchivos() - 1));
+        panelPantalla.agregarMensaje(">>     Archivos: " + disco.getInicioArchivos()
+                + "-" + (tamanoDiscoActual - 1));
     }
 
     private void mostrarEstadisticas() {
@@ -452,18 +525,8 @@ public class VentanaPrincipal extends JFrame {
             return;
         }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("Estadisticas de procesos terminados:\n\n");
-        for (BCPTerminado pt : terminados) {
-            sb.append("Proceso ").append(pt.getId()).append(":\n");
-            sb.append("  Inicio:   ").append(pt.getTiempoInicio()).append("\n");
-            sb.append("  Fin:      ").append(pt.getTiempoFin()).append("\n");
-            sb.append("  Duracion: ").append(pt.getDuracionSegundos()).append("s\n");
-            sb.append("  Estado:   ").append(pt.getEstado()).append("\n\n");
-        }
-
-        JOptionPane.showMessageDialog(this, sb.toString(),
-                "Estadisticas", JOptionPane.INFORMATION_MESSAGE);
+        VentanaEstadisticas ventana = new VentanaEstadisticas(this, terminados);
+        ventana.setVisible(true);
     }
 
     private void refrescarTodo() {
@@ -479,12 +542,6 @@ public class VentanaPrincipal extends JFrame {
         int ir = (actual != null) ? actual.getIr() : -1;
         panelMemoria.actualizar(memoria, ir);
 
-        panelMemoriaVirtual.actualizar(memoriaVirtual);
-
-        List<String[]> entradas = new ArrayList<>();
-        for (java.util.Map.Entry<String, Integer> e : disco.getIndice().entrySet()) {
-            entradas.add(new String[]{ e.getKey(), "dir " + e.getValue() });
-        }
-        panelDisco.actualizar(entradas, tamanoDiscoActual);
+        panelDisco.actualizar(disco);
     }
 }
