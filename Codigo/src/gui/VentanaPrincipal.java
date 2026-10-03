@@ -3,7 +3,7 @@ package gui;
 import config.ConfiguracionExterna;
 import logica.GestorProcesos;
 import logica.ListaDeTrabajos;
-import logica.ParticionadorFijo;
+import logica.ParticionadorDinamico;
 import logica.ResultadoCarga;
 import logica.BCPTerminado;
 import modelo.BCP;
@@ -37,10 +37,8 @@ import java.util.List;
 
 public class VentanaPrincipal extends JFrame {
 
-    // Configuracion externa (config.txt)
     private ConfiguracionExterna config;
 
-    // Valores actuales (cargados de config.txt)
     private int tamanoMemoriaActual;
     private int limiteKernelActual;
     private int maxProcesosActual;
@@ -51,7 +49,7 @@ public class VentanaPrincipal extends JFrame {
     private Memoria memoria;
     private CPU cpu;
     private ListaDeTrabajos listaDeTrabajos;
-    private ParticionadorFijo particionador;
+    private ParticionadorDinamico particionador;
     private GestorProcesos gestor;
     private Disco disco;
 
@@ -72,12 +70,10 @@ public class VentanaPrincipal extends JFrame {
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
 
-        // 1. Cargar configuracion externa ANTES de inicializar
         config = new ConfiguracionExterna();
         config.cargar();
         aplicarConfiguracion(config);
 
-        // 2. Configurar la ventana
         aplicarLookAndFeel();
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1400, 900);
@@ -97,8 +93,6 @@ public class VentanaPrincipal extends JFrame {
         inicializarComponentes();
         refrescarTodo();
 
-        // 3. Avisar si hubo correcciones en config.txt
-        //    (después de que la ventana ya esté armada)
         if (config.huboCorrecciones()) {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 JOptionPane.showMessageDialog(this,
@@ -112,10 +106,6 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
-    /**
-     * Aplica los valores de la configuracion externa a las variables
-     * de instancia.
-     */
     private void aplicarConfiguracion(ConfiguracionExterna config) {
         this.tamanoMemoriaActual = config.getMemoria();
         this.limiteKernelActual = config.getKernel();
@@ -143,10 +133,9 @@ public class VentanaPrincipal extends JFrame {
         cpu = new CPU(limiteKernelActual);
         disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
         listaDeTrabajos = new ListaDeTrabajos();
-        particionador = new ParticionadorFijo(
+        particionador = new ParticionadorDinamico(
                 limiteKernelActual,
-                memoria.getEspacioUsuarioDisponible(),
-                maxProcesosActual);
+                memoria.getEspacioUsuarioDisponible());
         gestor = new GestorProcesos(memoria, cpu,
                                     listaDeTrabajos, particionador, disco);
     }
@@ -317,7 +306,7 @@ public class VentanaPrincipal extends JFrame {
                 return;
             case EN_ESPERA:
                 panelPantalla.agregarMensaje(">> " + archivo.getName()
-                        + " en espera (no hay particion libre)");
+                        + " en espera (no hay hueco suficiente)");
                 break;
         }
 
@@ -457,14 +446,12 @@ public class VentanaPrincipal extends JFrame {
         int nuevoMaxArchivos = dialogo.getMaxArchivos();
         int nuevoSwap   = dialogo.getTamanoSwap();
 
-        // Actualizar variables de instancia
         this.tamanoMemoriaActual = nuevoTamano;
         this.limiteKernelActual = nuevoLimite;
         this.tamanoDiscoActual = nuevoDisco;
         this.maxArchivosActual = nuevoMaxArchivos;
         this.tamanoSwapActual = nuevoSwap;
 
-        // Actualizar config y guardar en config.txt
         config.setMemoria(nuevoTamano);
         config.setKernel(nuevoLimite);
         config.setDisco(nuevoDisco);
@@ -472,15 +459,13 @@ public class VentanaPrincipal extends JFrame {
         config.setMemoriaVirtual(nuevoSwap);
         config.guardar();
 
-        // Recrear componentes
         memoria = new Memoria(nuevoTamano, nuevoLimite);
         cpu = new CPU(nuevoLimite);
         disco = new Disco(nuevoDisco, nuevoMaxArchivos, nuevoSwap);
         listaDeTrabajos = new ListaDeTrabajos();
-        particionador = new ParticionadorFijo(
+        particionador = new ParticionadorDinamico(
                 nuevoLimite,
-                memoria.getEspacioUsuarioDisponible(),
-                maxProcesosActual);
+                memoria.getEspacioUsuarioDisponible());
         gestor = new GestorProcesos(memoria, cpu,
                                     listaDeTrabajos, particionador, disco);
 

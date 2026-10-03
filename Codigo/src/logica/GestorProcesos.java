@@ -19,6 +19,10 @@ import java.util.List;
  *     idle hasta que se desbloquee. NO se ejecuta otro proceso.
  *   - Si un proceso se bloquea por INT 21H (E/S a disco), se simula
  *     una tardanza de N segundos. El proceso sigue siendo el actual.
+ *
+ * Particionamiento dinámico (first-fit):
+ *   - Cada proceso ocupa exactamente las posiciones que necesita.
+ *   - Al liberar, se fusionan huecos adyacentes (coalescing).
  */
 public class GestorProcesos {
 
@@ -36,7 +40,7 @@ public class GestorProcesos {
     private ListaDeTrabajos listaDeTrabajos;
     private Planificador planificador;
     private Despachador despachador;
-    private ParticionadorFijo particionador;
+    private ParticionadorDinamico particionador;
     private Disco disco;
 
     private int siguienteId;
@@ -50,7 +54,7 @@ public class GestorProcesos {
     public GestorProcesos(Memoria memoria,
                           CPU cpu,
                           ListaDeTrabajos listaDeTrabajos,
-                          ParticionadorFijo particionador,
+                          ParticionadorDinamico particionador,
                           Disco disco) {
         this.memoria = memoria;
         this.cpu = cpu;
@@ -77,22 +81,20 @@ public class GestorProcesos {
         }
 
         List<Instruccion> instrucciones = ensamblador.leerArchivo(archivo);
+        int tamanoNecesario = instrucciones.size();
 
-        if (instrucciones.size() > particionador.getTamanoParticion()) {
-            return ResultadoCarga.error(
-                "El programa tiene " + instrucciones.size() + " instrucciones, "
-                + "pero cada partición solo admite " + particionador.getTamanoParticion());
-        }
-
-        int indice = particionador.asignarParticion();
-        if (indice != -1) {
-            BCP bcp = crearProcesoEnParticion(instrucciones, indice);
+        // ¿Hay un hueco suficientemente grande en la zona usuario?
+        int base = particionador.asignarParticion(tamanoNecesario);
+        if (base != -1) {
+            BCP bcp = crearProcesoEnParticion(instrucciones, base);
             if (bcp != null) {
                 return ResultadoCarga.exito(bcp);
             }
-            particionador.liberarParticion(indice);
+            // No hay espacio en kernel: liberar la partición recién asignada
+            particionador.liberarParticion(base, tamanoNecesario);
         }
 
+        // No cabe en memoria principal: intentar swap
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
             return resultadoSwap;
@@ -136,13 +138,13 @@ public class GestorProcesos {
         return ResultadoCarga.enEspera();
     }
 
-    private BCP crearProcesoEnParticion(List<Instruccion> instrucciones, int indiceParticion) {
+    private BCP crearProcesoEnParticion(List<Instruccion> instrucciones, int base) {
         int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
         if (direccionBase == -1) {
             return null;
         }
         BCP bcp = new BCP(memoria, direccionBase, siguienteId++, 1);
-        admitirEnParticion(bcp, instrucciones, indiceParticion);
+        admitirEnParticion(bcp, instrucciones, base);
         return bcp;
     }
 
@@ -327,13 +329,15 @@ public class GestorProcesos {
         int base = bcp.getBase();
         int alcance = bcp.getAlcance();
 
-        int indice = particionador.indiceDesdePosicion(base);
-        particionador.liberarParticion(indice);
+        // Liberar la particion dinamica (con coalescing)
+        particionador.liberarParticion(base, alcance);
 
+        // Limpiar las posiciones de la zona usuario
         for (int i = 0; i < alcance; i++) {
             memoria.escribir(base + i, null);
         }
 
+        // Liberar el bloque del BCP en el kernel
         memoria.liberarBloque(bcp.getDireccionBase(), BCP.POSICIONES_REQUERIDAS);
 
         reactivarSiguienteProceso();
@@ -344,22 +348,23 @@ public class GestorProcesos {
             return;
         }
 
-        int indiceNuevo = particionador.asignarParticion();
-        if (indiceNuevo == -1) {
-            return;
+        ProcesoEnEspera pe = procesosSuspendidos.get(0);
+        int tamanoInstrucciones = pe.getTamanoEnSwap();
+
+        // ¿Hay hueco en la zona usuario?
+        int base = particionador.asignarParticion(tamanoInstrucciones);
+        if (base == -1) {
+            return;   // no hay hueco suficientemente grande
         }
 
-        ProcesoEnEspera pe = procesosSuspendidos.get(0);
-
+        // ¿Hay espacio en kernel?
         int direccionBase = memoria.reservarBloque(BCP.POSICIONES_REQUERIDAS);
         if (direccionBase == -1) {
-            particionador.liberarParticion(indiceNuevo);
+            particionador.liberarParticion(base, tamanoInstrucciones);
             return;
         }
 
         int dirSwap = pe.getDireccionBaseEnSwap();
-        int tamanoInstrucciones = pe.getTamanoEnSwap();
-
         Object[] instruccionesArr = disco.leerBloqueSwap(dirSwap, tamanoInstrucciones);
 
         disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
@@ -374,15 +379,14 @@ public class GestorProcesos {
 
         BCP bcpRestaurado = new BCP(memoria, direccionBase, pe.getId(), 1);
 
-        admitirEnParticion(bcpRestaurado, instrucciones, indiceNuevo);
+        admitirEnParticion(bcpRestaurado, instrucciones, base);
 
         System.out.println("[SWAP] Proceso " + bcpRestaurado.getId()
                 + " reactivado desde swap (kernel=" + direccionBase
-                + ", usuario=" + particionador.getBaseParticion(indiceNuevo) + ")");
+                + ", usuario=" + base + ")");
     }
 
-    private void admitirEnParticion(BCP bcp, List<Instruccion> instrucciones, int indiceParticion) {
-        int base = particionador.getBaseParticion(indiceParticion);
+    private void admitirEnParticion(BCP bcp, List<Instruccion> instrucciones, int base) {
         bcp.setBase(base);
         bcp.setAlcance(instrucciones.size());
         bcp.setPc(base);
@@ -426,17 +430,7 @@ public class GestorProcesos {
         return getTotalProcesosActivos() + procesosSuspendidos.size();
     }
 
-    /**
-     * ¿Hay procesos activos?
-     *
-     * Considera:
-     *   - Procesos en la lista de trabajos.
-     *   - Proceso en CPU (RUNNING).
-     *   - Procesos bloqueados por IO o input.
-     *   - Proceso BLOCKED esperando al disco (INT 21H con tardanza).
-     */
     public boolean hayProcesosActivos() {
-        // Proceso BLOCKED esperando al disco (INT 21H con tardanza)
         if (despachador.getEjecutorActual() != null) {
             BCP b = despachador.getEjecutorActual().getBcp();
             if (b.getEstado() == EstadoProceso.BLOCKED
@@ -500,6 +494,10 @@ public class GestorProcesos {
 
     public Disco getDisco() {
         return disco;
+    }
+
+    public ParticionadorDinamico getParticionador() {
+        return particionador;
     }
 
     /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
