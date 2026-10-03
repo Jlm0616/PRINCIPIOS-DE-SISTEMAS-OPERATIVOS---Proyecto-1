@@ -2,6 +2,7 @@ package gui;
 
 import config.ConfiguracionExterna;
 import logica.GestorProcesos;
+import logica.ListaProcesos;
 import logica.ListaDeTrabajos;
 import logica.ParticionadorDinamico;
 import logica.ResultadoCarga;
@@ -48,7 +49,8 @@ public class VentanaPrincipal extends JFrame {
 
     private Memoria memoria;
     private CPU cpu;
-    private ListaDeTrabajos listaDeTrabajos;
+    private ListaProcesos listaProcesos;      // procesos en RAM
+    private ListaDeTrabajos listaDeTrabajos;  // procesos en disco (NEW)
     private ParticionadorDinamico particionador;
     private GestorProcesos gestor;
     private Disco disco;
@@ -132,12 +134,14 @@ public class VentanaPrincipal extends JFrame {
         memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual);
         cpu = new CPU(limiteKernelActual);
         disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
+        listaProcesos = new ListaProcesos();
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorDinamico(
                 limiteKernelActual,
                 memoria.getEspacioUsuarioDisponible());
         gestor = new GestorProcesos(memoria, cpu,
-                                    listaDeTrabajos, particionador, disco);
+                                    listaProcesos, listaDeTrabajos,
+                                    particionador, disco);
     }
 
     private void inicializarComponentes() {
@@ -462,12 +466,14 @@ public class VentanaPrincipal extends JFrame {
         memoria = new Memoria(nuevoTamano, nuevoLimite);
         cpu = new CPU(nuevoLimite);
         disco = new Disco(nuevoDisco, nuevoMaxArchivos, nuevoSwap);
+        listaProcesos = new ListaProcesos();
         listaDeTrabajos = new ListaDeTrabajos();
         particionador = new ParticionadorDinamico(
                 nuevoLimite,
                 memoria.getEspacioUsuarioDisponible());
         gestor = new GestorProcesos(memoria, cpu,
-                                    listaDeTrabajos, particionador, disco);
+                                    listaProcesos, listaDeTrabajos,
+                                    particionador, disco);
 
         configurarCallbacks();
 
@@ -518,10 +524,10 @@ public class VentanaPrincipal extends JFrame {
         BCP actual = gestor.getProcesoActual();
 
         panelProcesos.actualizarLista(
-                listaDeTrabajos,
+                gestor.getListaProcesos(),
                 actual,
-                gestor.getProcesosBloqueados(),
-                gestor.getProcesosEnEspera());
+                gestor.getProcesosBloqueadosInput(),
+                gestor.getListaDeTrabajos());
         panelProcesos.actualizarBCP(actual);
 
         int ir = (actual != null) ? actual.getIr() : -1;

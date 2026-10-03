@@ -1,6 +1,6 @@
 package logica.planificacion;
 
-import logica.ListaDeTrabajos;
+import logica.ListaProcesos;
 import modelo.BCP;
 
 /**
@@ -8,6 +8,8 @@ import modelo.BCP;
  *
  * Política: el primer proceso en llegar es el primero en ejecutarse.
  * No apropiativo: un proceso se ejecuta hasta terminar o bloquearse.
+ *
+ * Trabaja sobre la ListaProcesos (procesos en RAM).
  *
  * Para FCFS puro:
  *   - Si un proceso se bloquea por INT 09H, la CPU queda idle
@@ -17,8 +19,8 @@ import modelo.BCP;
 public class PlanificadorFCFS implements EstrategiaPlanificacion {
 
     @Override
-    public BCP seleccionarSiguiente(ListaDeTrabajos listaDeTrabajos) {
-        return listaDeTrabajos.verPrimero();
+    public BCP seleccionarSiguiente(ListaProcesos listaProcesos) {
+        return listaProcesos.verPrimero();
     }
 
     @Override

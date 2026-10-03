@@ -7,32 +7,35 @@ import modelo.BCP;
 /**
  * Planificador de procesos.
  *
- * Delega la decisión a una {@link EstrategiaPlanificacion} concreta.
+ * Delega la decision a una {@link EstrategiaPlanificacion} concreta.
  * Por defecto usa FCFS. Se puede cambiar en runtime con
  * {@link #setEstrategia(EstrategiaPlanificacion)}.
+ *
+ * Trabaja sobre la ListaProcesos (procesos en RAM). La ListaDeTrabajos
+ * (procesos en disco) se gestiona desde GestorProcesos.
  */
 public class Planificador {
 
     private EstrategiaPlanificacion estrategia;
-    private ListaDeTrabajos listaDeTrabajos;
+    private ListaProcesos listaProcesos;
 
-    public Planificador(ListaDeTrabajos listaDeTrabajos) {
-        this.listaDeTrabajos = listaDeTrabajos;
+    public Planificador(ListaProcesos listaProcesos) {
+        this.listaProcesos = listaProcesos;
         this.estrategia = new PlanificadorFCFS();   // default
     }
 
     /**
-     * Selecciona el siguiente BCP a ejecutar según la estrategia activa.
+     * Selecciona el siguiente BCP a ejecutar segun la estrategia activa.
      */
     public BCP seleccionarSiguiente() {
-        return estrategia.seleccionarSiguiente(listaDeTrabajos);
+        return estrategia.seleccionarSiguiente(listaProcesos);
     }
 
     /**
-     * @return true si hay algún proceso listo para ejecutar.
+     * @return true si hay algun proceso listo para ejecutar.
      */
     public boolean hayProcesosPendientes() {
-        return !listaDeTrabajos.estaVacia();
+        return !listaProcesos.estaVacia();
     }
 
     public EstrategiaPlanificacion getEstrategia() {

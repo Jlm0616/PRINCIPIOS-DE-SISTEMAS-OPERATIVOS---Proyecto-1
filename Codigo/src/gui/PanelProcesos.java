@@ -2,9 +2,9 @@ package gui;
 
 import modelo.BCP;
 import modelo.EstadoProceso;
+import logica.ListaProcesos;
 import logica.ListaDeTrabajos;
 import logica.ProcesoEnEspera;
-import logica.BCPTerminado;
 
 import javax.swing.JPanel;
 import javax.swing.JTable;
@@ -30,7 +30,9 @@ import java.util.Set;
 
 /**
  * Panel que muestra:
- *   - Arriba: TODOS los procesos (READY + RUNNING + BLOCKED + EXIT + READY_SUSPEND).
+ *   - Arriba: TODOS los procesos (en RAM y en disco).
+ *     * En RAM: READY, RUNNING, BLOCKED.
+ *     * En disco: NEW (esperando entrar a RAM).
  *   - Abajo: el BCP del proceso actual.
  */
 public class PanelProcesos extends JPanel {
@@ -106,7 +108,7 @@ public class PanelProcesos extends JPanel {
         scrollTabla.setPreferredSize(new Dimension(0, 200));
         scrollTabla.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(Paleta.VERDE_OSCURO, 2),
-                "Procesos",
+                "Procesos (RAM + Disco)",
                 TitledBorder.DEFAULT_JUSTIFICATION,
                 TitledBorder.DEFAULT_POSITION,
                 Paleta.FUENTE_TITULO_PANEL,
@@ -215,14 +217,23 @@ public class PanelProcesos extends JPanel {
 
     /* ==================== ACTUALIZACION ==================== */
 
-    public void actualizarLista(ListaDeTrabajos lista,
+    /**
+     * Actualiza la tabla con todos los procesos:
+     *   - ListaProcesos: procesos en RAM (READY, RUNNING, BLOCKED).
+     *   - Proceso actual: el que esta en la CPU (RUNNING).
+     *   - Procesos bloqueados por input: esperando teclado.
+     *   - ListaDeTrabajos: procesos en disco (NEW).
+     *
+     * Evita duplicados usando un Set de IDs.
+     */
+    public void actualizarLista(ListaProcesos listaProcesos,
                                 BCP procesoActual,
-                                List<BCP> procesosBloqueados,
-                                List<ProcesoEnEspera> procesosEnEspera) {
+                                List<BCP> procesosBloqueadosInput,
+                                ListaDeTrabajos listaDeTrabajos) {
         modeloProcesos.setRowCount(0);
         Set<Integer> idsAgregados = new HashSet<>();
 
-        // 1. Proceso actual
+        // 1. Proceso actual (RUNNING o BLOCKED por IO)
         if (procesoActual != null) {
             modeloProcesos.addRow(new Object[]{
                 "ID " + procesoActual.getId(),
@@ -231,9 +242,9 @@ public class PanelProcesos extends JPanel {
             idsAgregados.add(procesoActual.getId());
         }
 
-        // 2. Lista de trabajos (READY)
-        if (lista != null) {
-            for (BCP bcp : lista.toList()) {
+        // 2. Lista de procesos en RAM (READY, BLOCKED)
+        if (listaProcesos != null) {
+            for (BCP bcp : listaProcesos.toList()) {
                 if (idsAgregados.add(bcp.getId())) {
                     modeloProcesos.addRow(new Object[]{
                         "ID " + bcp.getId(),
@@ -243,9 +254,9 @@ public class PanelProcesos extends JPanel {
             }
         }
 
-        // 3. Procesos bloqueados
-        if (procesosBloqueados != null) {
-            for (BCP bcp : procesosBloqueados) {
+        // 3. Procesos bloqueados por input (BLOCKED, esperando teclado)
+        if (procesosBloqueadosInput != null) {
+            for (BCP bcp : procesosBloqueadosInput) {
                 if (idsAgregados.add(bcp.getId())) {
                     modeloProcesos.addRow(new Object[]{
                         "ID " + bcp.getId(),
@@ -255,9 +266,9 @@ public class PanelProcesos extends JPanel {
             }
         }
 
-        // 5. Procesos en espera (READY_SUSPEND)   ← CORREGIDO
-        if (procesosEnEspera != null) {
-            for (ProcesoEnEspera pe : procesosEnEspera) {
+        // 4. Lista de trabajos (procesos en disco, NEW)
+        if (listaDeTrabajos != null) {
+            for (ProcesoEnEspera pe : listaDeTrabajos.toList()) {
                 if (idsAgregados.add(pe.getId())) {
                     modeloProcesos.addRow(new Object[]{
                         "ID " + pe.getId(),
