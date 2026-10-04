@@ -46,6 +46,7 @@ public class VentanaPrincipal extends JFrame {
     private int tamanoDiscoActual;
     private int maxArchivosActual;
     private int tamanoSwapActual;
+    private int limiteKernelActual;
 
     private Memoria memoria;
     private CPU cpu;
@@ -95,6 +96,7 @@ public class VentanaPrincipal extends JFrame {
         inicializarComponentes();
         refrescarTodo();
 
+        // ==== Mostrar correcciones automaticas ====
         if (config.huboCorrecciones()) {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 JOptionPane.showMessageDialog(this,
@@ -110,6 +112,7 @@ public class VentanaPrincipal extends JFrame {
 
     private void aplicarConfiguracion(ConfiguracionExterna config) {
         this.tamanoMemoriaActual = config.getMemoria();
+        this.limiteKernelActual = config.getKernel();
         this.maxProcesosActual = config.getMaxProcesos();
         this.tamanoDiscoActual = config.getDisco();
         this.maxArchivosActual = config.getMaxArchivos();
@@ -129,22 +132,48 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
+    /**
+     * Inicializa el sistema con la configuracion actual.
+     *
+     * La Memoria ya NO lanza excepcion por falta de BCPs: calcula
+     * automaticamente cuantos caben en el 30% y los sobrantes esperan
+     * en la ListaDeTrabajos (disco). Solo lanza excepcion si el kernel
+     * no alcanza ni para 1 BCP, o si los parametros son invalidos.
+     */
     private void inicializarSistema() {
-        memoria = new Memoria(tamanoMemoriaActual, maxProcesosActual);
-        cpu = new CPU(memoria.getLimiteKernelUsuario());
-        disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
+        try {
+            memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual, maxProcesosActual);
+            cpu = new CPU(limiteKernelActual);
+            disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
 
-        listaProcesos = new ListaProcesos(memoria);
-        listaDeTrabajos = new ListaDeTrabajos();
+            listaProcesos = new ListaProcesos(memoria);
+            listaDeTrabajos = new ListaDeTrabajos();
 
-        particionador = new ParticionadorDinamico(
-                memoria,
-                memoria.getLimiteKernelUsuario(),
-                memoria.getEspacioUsuarioDisponible());
+            particionador = new ParticionadorDinamico(
+                    memoria,
+                    memoria.getLimiteKernelUsuario(),
+                    memoria.getEspacioUsuarioDisponible());
 
-        gestor = new GestorProcesos(memoria, cpu,
-                                    listaProcesos, listaDeTrabajos,
-                                    particionador, disco);
+            gestor = new GestorProcesos(memoria, cpu,
+                                        listaProcesos, listaDeTrabajos,
+                                        particionador, disco);
+        } catch (IllegalArgumentException e) {
+            // Solo si el kernel no alcanza ni para 1 BCP o hay parametros invalidos
+            int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1);
+
+            JOptionPane.showMessageDialog(this,
+                    "No se puede inicializar el sistema:\n\n"
+                    + e.getMessage() + "\n\n"
+                    + "El kernel debe ser al menos " + kernelMinimoParaUno
+                    + " posiciones para 1 proceso.\n"
+                    + "Con memoria=" + tamanoMemoriaActual
+                    + " y kernel=" + limiteKernelActual
+                    + " no alcanza.\n\n"
+                    + "Edita config.txt o usa 'Configurar' para ajustar.",
+                    "Error de configuracion",
+                    JOptionPane.ERROR_MESSAGE);
+            throw e;
+        }
     }
 
     private void inicializarComponentes() {
@@ -167,6 +196,7 @@ public class VentanaPrincipal extends JFrame {
         centro.add(panelDisco);
         mainPanel.add(centro, BorderLayout.CENTER);
 
+        // Sur: solo pantalla (sin panel de recursos)
         panelPantalla = new PanelPantalla();
         mainPanel.add(panelPantalla, BorderLayout.SOUTH);
 
@@ -438,26 +468,30 @@ public class VentanaPrincipal extends JFrame {
         VentanaConfiguracion dialogo = new VentanaConfiguracion(
                 this,
                 tamanoMemoriaActual,
-                memoria.getLimiteKernelUsuario(),
+                limiteKernelActual,
                 tamanoDiscoActual,
                 maxArchivosActual,
-                tamanoSwapActual);
+                tamanoSwapActual,
+                maxProcesosActual);
 
         dialogo.setVisible(true);
 
         if (!dialogo.isConfirmado()) return;
 
         int nuevoTamano = dialogo.getTamanoMemoria();
+        int nuevoKernel = dialogo.getLimiteKernel();
         int nuevoDisco  = dialogo.getTamanoDisco();
         int nuevoMaxArchivos = dialogo.getMaxArchivos();
         int nuevoSwap   = dialogo.getTamanoSwap();
 
         this.tamanoMemoriaActual = nuevoTamano;
+        this.limiteKernelActual = nuevoKernel;
         this.tamanoDiscoActual = nuevoDisco;
         this.maxArchivosActual = nuevoMaxArchivos;
         this.tamanoSwapActual = nuevoSwap;
 
         config.setMemoria(nuevoTamano);
+        config.setKernel(nuevoKernel);
         config.setDisco(nuevoDisco);
         config.setMaxArchivos(nuevoMaxArchivos);
         config.setMemoriaVirtual(nuevoSwap);
@@ -481,11 +515,13 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void mostrarMensajeConfiguracion() {
-        int limiteKernel = memoria.getLimiteKernelUsuario();
         panelPantalla.agregarMensaje(">> Configuracion aplicada:");
         panelPantalla.agregarMensaje(">>   Memoria: " + tamanoMemoriaActual + " posiciones");
-        panelPantalla.agregarMensaje(">>   Kernel: 0-" + (limiteKernel - 1)
-                + ", Usuario: " + limiteKernel + "-" + (tamanoMemoriaActual - 1));
+        panelPantalla.agregarMensaje(">>   Kernel: 0-" + (limiteKernelActual - 1)
+                + ", Usuario: " + limiteKernelActual + "-" + (tamanoMemoriaActual - 1));
+        panelPantalla.agregarMensaje(">>   BCPs disponibles en kernel: "
+                + memoria.getBcpsQueCaben()
+                + " (configurados: " + maxProcesosActual + ")");
         panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual
                 + " posiciones (maxArchivos=" + maxArchivosActual
                 + ", swap=" + tamanoSwapActual + ")");

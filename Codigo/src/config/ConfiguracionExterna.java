@@ -1,6 +1,5 @@
 package config;
 
-import modelo.BCP;
 import modelo.Memoria;
 
 import java.io.File;
@@ -15,43 +14,73 @@ import java.util.Properties;
  * Lee y escribe los parametros del sistema desde un archivo de texto
  * (config.txt) con formato "clave=valor".
  *
- * IMPORTANTE: el kernel ya NO se configura. Se CALCULA automaticamente
- * segun las 3 zonas fijas (Stallings, seccion 3.3):
- *   - ListaProcesos (5)
- *   - BCPs (maxProcesos × 30)
- *   - TablaMemoria (15)
+ * Parametros (DEFAULTS DEL PROFESOR):
+ *   - memoria: tamano total de la memoria principal. DEFAULT: 256 (profesor).
+ *   - kernel: limite kernel/usuario. Minimo 30% de memoria.
+ *   - disco: tamano total del disco. DEFAULT: 512 (profesor).
+ *   - max_archivos: cantidad maxima de archivos en el indice. DEFAULT: 10.
+ *   - memoria_virtual: tamano del swap. DEFAULT: 64 (profesor).
+ *   - max_procesos: cantidad maxima de procesos. DEFAULT: 5 (profesor).
+ *
+ * POLITICA:
+ *   1. Se aplica SIEMPRE el minimo del 30% para el kernel.
+ *   2. Los BCPs que NO quepan en el kernel no son un error: los procesos
+ *      sobrantes esperan en la ListaDeTrabajos (disco), segun el enunciado:
+ *      "En el caso de que no exista espacio para almacenar un proceso en
+ *       memoria principal, este debe esperar hasta que sea liberado."
  */
 public class ConfiguracionExterna {
 
     public static final String ARCHIVO = "config.txt";
 
-    /* ==================== VALORES POR DEFECTO ==================== */
+    /** Porcentaje minimo del kernel respecto a la memoria total. */
+    public static final double PORCENTAJE_MINIMO_KERNEL = 0.30;
 
-    public static final int MEMORIA_DEFAULT         = 256;
-    public static final int DISCO_DEFAULT           = 512;
-    public static final int MAX_ARCHIVOS_DEFAULT    = 10;
+    /* ==================== VALORES POR DEFECTO (PROFESOR) ==================== */
+
+    /** Default indicado por el profesor: 256. */
+    public static final int MEMORIA_DEFAULT = 256;
+
+    /** Kernel por defecto: 30% de la memoria default (256). */
+    public static final int KERNEL_DEFAULT = (int) Math.ceil(256 * PORCENTAJE_MINIMO_KERNEL); // 77
+
+    /** Default indicado por el profesor: 512. */
+    public static final int DISCO_DEFAULT = 512;
+
+    /** Default indicado por el profesor: 10. */
+    public static final int MAX_ARCHIVOS_DEFAULT = 10;
+
+    /** Default indicado por el profesor: 64. */
     public static final int MEMORIA_VIRTUAL_DEFAULT = 64;
-    public static final int MAX_PROCESOS_DEFAULT    = 5;
+
+    /** Default indicado por el profesor: 5. */
+    public static final int MAX_PROCESOS_DEFAULT = 5;
 
     /* ==================== RESTRICCIONES ==================== */
 
-    public static final int MEMORIA_MAXIMO          = 65536;
-    public static final int POSICIONES_POR_INSTRUCCION = 2;
+    /** Minimo absoluto de memoria. */
+    public static final int MEMORIA_MINIMO = 128;
 
-    public static final int DISCO_MINIMO            = 128;
-    public static final int DISCO_MAXIMO            = 65536;
-    public static final int MAX_ARCHIVOS_MINIMO     = 1;
-    public static final int MAX_ARCHIVOS_MAXIMO     = 100;
-    public static final int MEMORIA_VIRTUAL_MINIMO  = 16;
-    public static final int MEMORIA_VIRTUAL_MAXIMO  = 65536;
+    public static final int MEMORIA_MAXIMO = 65536;
+
+    /** 1 posicion por instruccion (coherente con Memoria). */
+    public static final int POSICIONES_POR_INSTRUCCION = 1;
+
+    public static final int DISCO_MINIMO = 128;
+    public static final int DISCO_MAXIMO = 65536;
+    public static final int MAX_ARCHIVOS_MINIMO = 1;
+    public static final int MAX_ARCHIVOS_MAXIMO = 100;
+    public static final int MEMORIA_VIRTUAL_MINIMO = 16;
+    public static final int MEMORIA_VIRTUAL_MAXIMO = 65536;
     public static final int ESPACIO_ARCHIVOS_MINIMO = 64;
 
-    public static final int MAX_PROCESOS_MINIMO     = 1;
-    public static final int MAX_PROCESOS_MAXIMO     = 10;
+    public static final int MAX_PROCESOS_MINIMO = 1;
+    public static final int MAX_PROCESOS_MAXIMO = 10;
 
     /* ==================== VALORES ACTUALES ==================== */
 
     private int memoria         = MEMORIA_DEFAULT;
+    private int kernel          = KERNEL_DEFAULT;
     private int disco           = DISCO_DEFAULT;
     private int maxArchivos     = MAX_ARCHIVOS_DEFAULT;
     private int memoriaVirtual  = MEMORIA_VIRTUAL_DEFAULT;
@@ -77,6 +106,7 @@ public class ConfiguracionExterna {
             props.load(in);
 
             memoria        = parsear(props, "memoria",        memoria);
+            kernel         = parsear(props, "kernel",         kernel);
             disco          = parsear(props, "disco",          disco);
             maxArchivos    = parsear(props, "max_archivos",   maxArchivos);
             memoriaVirtual = parsear(props, "memoria_virtual", memoriaVirtual);
@@ -86,7 +116,7 @@ public class ConfiguracionExterna {
 
             System.out.println("[CONFIG] Configuracion cargada desde " + ARCHIVO);
             System.out.println("[CONFIG]   Memoria: " + memoria
-                    + " (kernel=" + getTamanoKernel() + ")");
+                    + ", Kernel: " + kernel);
             System.out.println("[CONFIG]   Disco: " + disco
                     + ", MaxArchivos: " + maxArchivos
                     + ", Swap: " + memoriaVirtual);
@@ -105,7 +135,7 @@ public class ConfiguracionExterna {
         huboCorrecciones = false;
         mensajesCorrecciones.setLength(0);
 
-        // ==== MAX_PROCESOS (primero, porque afecta al tamano del kernel) ====
+        // ==== MAX_PROCESOS ====
         if (maxProcesos < MAX_PROCESOS_MINIMO) {
             agregarCorreccion("max_procesos=" + maxProcesos
                     + " invalido (minimo " + MAX_PROCESOS_MINIMO + "). Usando "
@@ -118,25 +148,43 @@ public class ConfiguracionExterna {
             maxProcesos = MAX_PROCESOS_DEFAULT;
         }
 
-        // ==== MEMORIA (depende del tamano del kernel) ====
-        int tamanoBCPs = maxProcesos * BCP.POSICIONES_REQUERIDAS;
-        int tamanoKernel = Memoria.TAMANO_LISTA_PROCESOS + tamanoBCPs
-                         + Memoria.TAMANO_TABLA_MEMORIA;
-        int memoriaMinima = tamanoKernel + POSICIONES_POR_INSTRUCCION;
-
-        if (memoria < memoriaMinima) {
+        // ==== MEMORIA ====
+        if (memoria < MEMORIA_MINIMO) {
             agregarCorreccion("memoria=" + memoria
-                    + " invalido (minimo " + memoriaMinima
-                    + " = kernel " + tamanoKernel + " + "
-                    + POSICIONES_POR_INSTRUCCION + " de usuario). Usando "
-                    + Math.max(memoriaMinima, MEMORIA_DEFAULT) + ".");
-            memoria = Math.max(memoriaMinima, MEMORIA_DEFAULT);
+                    + " invalido (minimo " + MEMORIA_MINIMO + "). Usando "
+                    + MEMORIA_DEFAULT + ".");
+            memoria = MEMORIA_DEFAULT;
         } else if (memoria > MEMORIA_MAXIMO) {
             agregarCorreccion("memoria=" + memoria
                     + " invalido (maximo " + MEMORIA_MAXIMO + "). Usando "
                     + MEMORIA_DEFAULT + ".");
             memoria = MEMORIA_DEFAULT;
         }
+
+        // ==== KERNEL: solo minimo 30% de la memoria ====
+        int kernelMinimoPorcentaje = (int) Math.ceil(memoria * PORCENTAJE_MINIMO_KERNEL);
+
+        if (kernel >= memoria) {
+            agregarCorreccion("kernel=" + kernel
+                    + " invalido (debe ser < memoria=" + memoria + "). Usando "
+                    + kernelMinimoPorcentaje + " (30%).");
+            kernel = kernelMinimoPorcentaje;
+        } else if (kernel < kernelMinimoPorcentaje) {
+            agregarCorreccion("kernel=" + kernel
+                    + " invalido (minimo " + ((int)(PORCENTAJE_MINIMO_KERNEL*100))
+                    + "% de memoria=" + memoria + " → " + kernelMinimoPorcentaje
+                    + "). Usando " + kernelMinimoPorcentaje + ".");
+            kernel = kernelMinimoPorcentaje;
+        } else if (memoria - kernel < POSICIONES_POR_INSTRUCCION) {
+            agregarCorreccion("memoria-kernel=" + (memoria - kernel)
+                    + " invalido (minimo " + POSICIONES_POR_INSTRUCCION
+                    + "). Ajustando kernel a " + (memoria - POSICIONES_POR_INSTRUCCION) + ".");
+            kernel = memoria - POSICIONES_POR_INSTRUCCION;
+        }
+
+        // NO se valida contra getTamanoKernelMinimo(maxProcesos).
+        // Si no caben todos los BCPs, los procesos sobrantes esperan en
+        // la ListaDeTrabajos (disco). Es el comportamiento normal.
 
         // ==== DISCO ====
         if (disco < DISCO_MINIMO) {
@@ -219,6 +267,7 @@ public class ConfiguracionExterna {
     public void guardar() {
         Properties props = new Properties();
         props.setProperty("memoria",         String.valueOf(memoria));
+        props.setProperty("kernel",          String.valueOf(kernel));
         props.setProperty("disco",           String.valueOf(disco));
         props.setProperty("max_archivos",    String.valueOf(maxArchivos));
         props.setProperty("memoria_virtual", String.valueOf(memoriaVirtual));
@@ -247,17 +296,10 @@ public class ConfiguracionExterna {
         }
     }
 
-    /**
-     * @return el tamano del kernel calculado segun las 3 zonas.
-     */
-    public int getTamanoKernel() {
-        int tamanoBCPs = maxProcesos * BCP.POSICIONES_REQUERIDAS;
-        return Memoria.TAMANO_LISTA_PROCESOS + tamanoBCPs + Memoria.TAMANO_TABLA_MEMORIA;
-    }
-
     /* ==================== GETTERS ==================== */
 
     public int getMemoria()        { return memoria; }
+    public int getKernel()         { return kernel; }
     public int getDisco()          { return disco; }
     public int getMaxArchivos()    { return maxArchivos; }
     public int getMemoriaVirtual() { return memoriaVirtual; }
@@ -269,6 +311,7 @@ public class ConfiguracionExterna {
     /* ==================== SETTERS ==================== */
 
     public void setMemoria(int v)        { this.memoria = v; }
+    public void setKernel(int v)         { this.kernel = v; }
     public void setDisco(int v)          { this.disco = v; }
     public void setMaxArchivos(int v)    { this.maxArchivos = v; }
     public void setMemoriaVirtual(int v) { this.memoriaVirtual = v; }
@@ -278,7 +321,7 @@ public class ConfiguracionExterna {
     public String toString() {
         return "ConfiguracionExterna{"
                 + "memoria=" + memoria
-                + ", kernel=" + getTamanoKernel()
+                + ", kernel=" + kernel
                 + ", disco=" + disco
                 + ", maxArchivos=" + maxArchivos
                 + ", memoriaVirtual=" + memoriaVirtual

@@ -43,13 +43,16 @@ public class VentanaConfiguracion extends JDialog {
      * @param tamanoDiscoActual    valor inicial del disco
      * @param maxArchivosActual    valor inicial de maxArchivos
      * @param tamanoSwapActual     valor inicial de la memoria virtual
+     * @param maxProcesosActual    cantidad de procesos configurada
+     *                             (para calcular el kernel minimo real)
      */
     public VentanaConfiguracion(Frame propietario,
                                  int tamanoMemoriaActual,
                                  int limiteKernelActual,
                                  int tamanoDiscoActual,
                                  int maxArchivosActual,
-                                 int tamanoSwapActual) {
+                                 int tamanoSwapActual,
+                                 int maxProcesosActual) {
         super(propietario, "Configuracion", true);
         this.confirmado = false;
         this.tamanoMemoria = tamanoMemoriaActual;
@@ -59,7 +62,8 @@ public class VentanaConfiguracion extends JDialog {
         this.tamanoSwap = tamanoSwapActual;
 
         construirInterfaz(tamanoMemoriaActual, limiteKernelActual,
-                          tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
+                          tamanoDiscoActual, maxArchivosActual,
+                          tamanoSwapActual, maxProcesosActual);
         pack();
         setResizable(false);
         setLocationRelativeTo(propietario);
@@ -69,9 +73,12 @@ public class VentanaConfiguracion extends JDialog {
                                     int limiteKernelActual,
                                     int tamanoDiscoActual,
                                     int maxArchivosActual,
-                                    int tamanoSwapActual) {
-        panelMemoria = new PanelConfigMemoria(tamanoMemoriaActual, limiteKernelActual);
-        panelDisco = new PanelConfigDisco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
+                                    int tamanoSwapActual,
+                                    int maxProcesosActual) {
+        panelMemoria = new PanelConfigMemoria(
+                tamanoMemoriaActual, limiteKernelActual, maxProcesosActual);
+        panelDisco = new PanelConfigDisco(
+                tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
 
         tabs = new JTabbedPane();
         tabs.addTab("Memoria", panelMemoria);
@@ -96,7 +103,7 @@ public class VentanaConfiguracion extends JDialog {
     }
 
     private void validarYConfirmar() {
-        // Validar memoria
+        // Validar memoria (incluye la regla del 30%)
         if (!panelMemoria.validar()) {
             tabs.setSelectedComponent(panelMemoria);
             return;

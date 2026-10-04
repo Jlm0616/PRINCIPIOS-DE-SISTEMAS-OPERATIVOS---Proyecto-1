@@ -18,7 +18,12 @@ import java.awt.Insets;
  * Panel de configuracion de la memoria principal.
  *
  * Contiene los campos de tamano total y limite kernel/usuario,
- * con auto-sugerencia del 20% para el limite.
+ * con auto-sugerencia del 30% para el limite.
+ *
+ * REGLA: el limite del kernel SIEMPRE debe ser al menos el 30% de la
+ * memoria total. Si con ese 30% no caben los BCPs configurados, el
+ * sistema lo avisara al inicializar y el usuario debera agrandar la RAM
+ * o reducir maxProcesos.
  *
  * No crea objetos Memoria: eso lo hace quien lo use (VentanaConfiguracion).
  */
@@ -30,11 +35,20 @@ public class PanelConfigMemoria extends JPanel {
     private boolean limiteEditadoManualmente = false;
     private boolean actualizandoAutomaticamente = false;
 
-    private static final double PORCENTAJE_MINIMO_KERNEL = 0.20;
-    private static final int TAMANO_MAXIMO = 65536;
-    private static final int POSICIONES_POR_INSTRUCCION = 2;
+    /** Porcentaje minimo del kernel respecto a la memoria total. */
+    private static final double PORCENTAJE_MINIMO_KERNEL = 0.30;
 
-    public PanelConfigMemoria(int tamanoActual, int limiteActual) {
+    /** Tamano maximo permitido de memoria (para evitar valores absurdos). */
+    private static final int TAMANO_MAXIMO = 65536;
+
+    /** Posiciones minimas que deben quedar en la zona de usuario. */
+    private static final int POSICIONES_MINIMAS_USUARIO = 1;
+
+    /** Cantidad de procesos configurada (para mostrar info en la ayuda). */
+    private final int maxProcesos;
+
+    public PanelConfigMemoria(int tamanoActual, int limiteActual, int maxProcesos) {
+        this.maxProcesos = maxProcesos;
         construirInterfaz(tamanoActual, limiteActual);
     }
 
@@ -49,8 +63,10 @@ public class PanelConfigMemoria extends JPanel {
         Font fontLabel = new Font("Segoe UI", Font.PLAIN, 13);
 
         // Etiqueta informativa
+        int porcentajeMostrar = (int) (PORCENTAJE_MINIMO_KERNEL * 100);
         JLabel lblInfo = new JLabel("Minimo permitido: " + Memoria.TAMANO_MINIMO
-                + " | Maximo permitido: " + TAMANO_MAXIMO);
+                + " | Maximo permitido: " + TAMANO_MAXIMO
+                + " | Kernel minimo: " + porcentajeMostrar + "%");
         lblInfo.setFont(new Font("Segoe UI", Font.ITALIC, 12));
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -58,6 +74,7 @@ public class PanelConfigMemoria extends JPanel {
         add(lblInfo, gbc);
         gbc.gridwidth = 1;
 
+        // ==== Tamano total de memoria ====
         JLabel lblTamano = new JLabel("Tamano total de memoria:");
         lblTamano.setFont(fontLabel);
         gbc.gridx = 0;
@@ -68,6 +85,7 @@ public class PanelConfigMemoria extends JPanel {
         gbc.gridx = 1;
         add(txtTamanoMemoria, gbc);
 
+        // ==== Limite Kernel/Usuario ====
         JLabel lblLimite = new JLabel("Limite Kernel/Usuario:");
         lblLimite.setFont(fontLabel);
         gbc.gridx = 0;
@@ -78,10 +96,18 @@ public class PanelConfigMemoria extends JPanel {
         gbc.gridx = 1;
         add(txtLimiteKernel, gbc);
 
-        // Texto de ayuda
-        JLabel lblAyuda = new JLabel("<html><body style='width: 320px'>"
-                + "Posiciones 0 a (limite-1) = zona Kernel.<br>"
-                + "Posiciones limite a (tamano-1) = zona Usuario."
+        // ==== Texto de ayuda ====
+        int kernelMinimoReal = Memoria.getTamanoKernelMinimo(maxProcesos);
+        JLabel lblAyuda = new JLabel("<html><body style='width: 380px'>"
+                + "Posiciones 0 a (limite-1) = zona <b>Kernel</b>.<br>"
+                + "Posiciones limite a (tamano-1) = zona <b>Usuario</b>.<br><br>"
+                + "El kernel debe ocupar al menos el <b>" + porcentajeMostrar + "%</b> "
+                + "de la memoria.<br>"
+                + "Con <b>" + maxProcesos + " procesos</b> configurados, el kernel "
+                + "necesita al menos <b>" + kernelMinimoReal + "</b> posiciones "
+                + "(ListaProcesos + BCPs + TablaMemoria).<br><br>"
+                + "Si el 30% no alcanza para los BCPs, aumenta la memoria "
+                + "o reduce max_procesos en config.txt."
                 + "</body></html>");
         lblAyuda.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         gbc.gridx = 0;
@@ -89,14 +115,14 @@ public class PanelConfigMemoria extends JPanel {
         gbc.gridwidth = 2;
         add(lblAyuda, gbc);
 
-        // Listener del tamaño
+        // ==== Listener del tamano: auto-sugerir limite ====
         txtTamanoMemoria.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) { sugerirLimite(); }
             @Override public void removeUpdate(DocumentEvent e) { sugerirLimite(); }
             @Override public void changedUpdate(DocumentEvent e) { sugerirLimite(); }
         });
 
-        // Listener del límite
+        // ==== Listener del limite: marcar como manual ====
         txtLimiteKernel.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) { marcarComoManual(); }
             @Override public void removeUpdate(DocumentEvent e) { marcarComoManual(); }
@@ -110,6 +136,10 @@ public class PanelConfigMemoria extends JPanel {
         });
     }
 
+    /**
+     * Sugiere un limite para el kernel igual al 30% de la memoria actual.
+     * Solo se aplica si el usuario no ha editado el campo manualmente.
+     */
     private void sugerirLimite() {
         if (limiteEditadoManualmente) return;
         try {
@@ -123,12 +153,23 @@ public class PanelConfigMemoria extends JPanel {
                 actualizandoAutomaticamente = false;
             }
         } catch (NumberFormatException e) {
-            // el usuario está escribiendo
+            // el usuario esta escribiendo, ignorar
         }
     }
 
     /**
      * Valida los campos del panel.
+     *
+     * Reglas:
+     *   1. Memoria y kernel deben ser enteros.
+     *   2. Memoria >= Memoria.TAMANO_MINIMO y <= TAMANO_MAXIMO.
+     *   3. Kernel < memoria.
+     *   4. Kernel >= 30% de la memoria.
+     *   5. Debe quedar al menos 1 posicion de usuario.
+     *
+     * NOTA: no se valida contra Memoria.getTamanoKernelMinimo(maxProcesos).
+     * Si con el 30% no alcanza para los BCPs, el sistema lo avisara al
+     * inicializar y el usuario debera agrandar la RAM o reducir maxProcesos.
      *
      * @return true si todo es valido; false si no (muestra mensaje de error)
      */
@@ -159,16 +200,20 @@ public class PanelConfigMemoria extends JPanel {
             return false;
         }
 
+        // === Regla del 30% ===
         int minimoKernel = (int) Math.ceil(tamanoIngresado * PORCENTAJE_MINIMO_KERNEL);
         if (limiteIngresado < minimoKernel) {
             int porcentajeMostrar = (int) (PORCENTAJE_MINIMO_KERNEL * 100);
             mostrarError("El limite del Kernel debe ser al menos el " + porcentajeMostrar
-                    + "% de la memoria total.");
+                    + "% de la memoria total (" + minimoKernel + " posiciones para "
+                    + tamanoIngresado + " de memoria).");
             return false;
         }
 
-        if (tamanoIngresado - limiteIngresado < POSICIONES_POR_INSTRUCCION) {
-            mostrarError("Debe quedar espacio para al menos 1 instruccion en la zona de Usuario.");
+        // === Al menos 1 posicion de usuario ===
+        if (tamanoIngresado - limiteIngresado < POSICIONES_MINIMAS_USUARIO) {
+            mostrarError("Debe quedar espacio para al menos " + POSICIONES_MINIMAS_USUARIO
+                    + " instruccion(es) en la zona de Usuario.");
             return false;
         }
 
