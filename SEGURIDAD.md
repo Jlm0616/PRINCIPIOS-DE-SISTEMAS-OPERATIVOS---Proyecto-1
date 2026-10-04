@@ -27,20 +27,14 @@ Ninguna capa por sí sola es suficiente, pero en conjunto garantizan que un prog
 
 ## 1. Aislamiento Kernel / Usuario
 
-### Estrategia
+### Distribución de la memoria principal
 
 La memoria principal está dividida en dos zonas claramente separadas:
-┌──────────────────────────────────────────────────┐
-│ ZONA KERNEL [0, limiteKernelUsuario) │
-│ ├── ListaProcesos (5 posiciones) │
-│ ├── BCPs (N × 30 posiciones) │
-│ └── TablaMemoria (15 posiciones) │
-├──────────────────────────────────────────────────┤
-│ ZONA USUARIO [limiteKernelUsuario, tamano) │
-│ └── Instrucciones de los procesos │
-└──────────────────────────────────────────────────┘
 
-text
+| Zona | Rango | Contenido |
+|---|---|---|
+| **Kernel** | `[0, limiteKernelUsuario)` | ListaProcesos (5 pos), BCPs (N × 30 pos), TablaMemoria (15 pos) |
+| **Usuario** | `[limiteKernelUsuario, tamano)` | Instrucciones de los procesos |
 
 ### Implementación
 
@@ -88,8 +82,6 @@ Solo se aceptan los registros definidos en el enunciado: `AC`, `AX`, `BX`, `CX`,
 
 Un `.asm` con `MOV ZZ, 5` es rechazado con un mensaje claro:
 Línea 3: registro desconocido 'ZZ'. Válidos: [AC, AX, BX, CX, DX]
-
-text
 
 ---
 
@@ -158,8 +150,6 @@ Un archivo con un error en la línea 5 se rechaza y se muestra:
 Línea 5: el desplazamiento 'abc' no es un numero entero valido
 -> "JMP abc"
 
-text
-
 ---
 
 ## 7. Validación de Configuración Externa
@@ -187,8 +177,6 @@ Se encontraron valores invalidos en config.txt
 y se corrigieron automaticamente:
 
 memoria=-5 invalido (minimo 128). Usando 256.
-
-text
 
 ---
 
