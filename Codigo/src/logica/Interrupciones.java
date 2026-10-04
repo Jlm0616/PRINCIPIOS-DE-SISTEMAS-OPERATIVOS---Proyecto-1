@@ -21,9 +21,9 @@ import java.util.function.Consumer;
  *   DX = numero usado para construir el nombre "archivo_<DX>".
  *   AL = resultado (0 exito, 1 error, o contenido leido).
  *
- * El disco simulado tiene 3 zonas: indice, swap, archivos.
- * Los archivos se registran en el indice con su nombre y sus
- * posiciones de inicio/fin en la zona de archivos.
+ * Al abrir un archivo, su nombre se agrega a las 5 posiciones de
+ * archivos abiertos del BCP (Stallings, Tabla 3.5: "Resource Ownership
+ * and Utilization: opened files").
  */
 public class Interrupciones {
 
@@ -79,9 +79,6 @@ public class Interrupciones {
 
     /**
      * INT 21H: manejo de archivos.
-     *
-     * El archivo se identifica por "archivo_<DX>".
-     * El disco registra los archivos en su indice (nombre, inicio, fin).
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
@@ -101,9 +98,20 @@ public class Interrupciones {
             }
 
             case 0x3D: {  // abrir archivo
-                boolean existe = disco.existe(nombre);
-                bcp.setAl(existe ? 0 : 1);
-                System.out.println("[DISCO] abrir(" + nombre + ") = " + existe);
+                if (!disco.existe(nombre)) {
+                    bcp.setAl(1);   // archivo no existe
+                    System.out.println("[DISCO] abrir(" + nombre + ") = NO EXISTE");
+                    break;
+                }
+                boolean abierto = bcp.abrirArchivo(nombre);
+                if (abierto) {
+                    bcp.setAl(0);
+                    System.out.println("[DISCO] abrir(" + nombre + ") = OK");
+                } else {
+                    bcp.setAl(1);   // demasiados archivos abiertos
+                    System.out.println("[DISCO] abrir(" + nombre + ") = ERROR (max "
+                            + BCP.TAMANO_MAXIMO_ARCHIVOS + " archivos abiertos)");
+                }
                 break;
             }
 
@@ -128,6 +136,9 @@ public class Interrupciones {
             }
 
             case 0x41: {  // eliminar archivo
+                // Cerrar primero si estaba abierto
+                bcp.cerrarArchivo(nombre);
+
                 boolean eliminado = eliminarArchivoDeDisco(nombre);
                 bcp.setAl(eliminado ? 0 : 1);
                 System.out.println("[DISCO] eliminar(" + nombre + ") = " + eliminado);
@@ -146,25 +157,17 @@ public class Interrupciones {
 
     /* ==================== HELPERS DE ARCHIVOS ==================== */
 
-    /**
-     * Crea un archivo vacio en el disco (1 posicion reservada).
-     * Lo registra en el indice.
-     */
     private boolean crearArchivoEnDisco(String nombre) {
         if (disco.existe(nombre)) return false;
 
         int inicio = disco.reservarBloqueArchivo(1);
         if (inicio == -1) return false;
 
-        // Escribir un caracter vacio
         disco.escribir(inicio, "");
 
         return disco.registrarArchivo(nombre, inicio, inicio);
     }
 
-    /**
-     * Lee el contenido completo de un archivo desde el disco.
-     */
     private String leerArchivoDeDisco(String nombre) {
         if (!disco.existe(nombre)) return null;
 
@@ -180,11 +183,6 @@ public class Interrupciones {
         return sb.toString();
     }
 
-    /**
-     * Escribe contenido en un archivo existente.
-     * Si el contenido es mas grande que el bloque actual, intenta
-     * reservar un bloque mas grande.
-     */
     private boolean escribirArchivoEnDisco(String nombre, String contenido) {
         if (!disco.existe(nombre)) return false;
         if (contenido == null) return false;
@@ -193,38 +191,29 @@ public class Interrupciones {
         int finViejo = disco.getFinArchivo(nombre);
         int tamanoViejo = (finViejo - inicioViejo) + 1;
 
-        // Si el contenido cabe en el bloque actual, sobreescribir
         if (contenido.length() <= tamanoViejo) {
             for (int i = 0; i < contenido.length(); i++) {
                 disco.escribir(inicioViejo + i, String.valueOf(contenido.charAt(i)));
             }
-            // Limpiar el resto del bloque
             for (int i = contenido.length(); i < tamanoViejo; i++) {
                 disco.escribir(inicioViejo + i, null);
             }
             return true;
         }
 
-        // Contenido mas grande: reservar bloque nuevo y liberar el viejo
         int nuevoInicio = disco.reservarBloqueArchivo(contenido.length());
         if (nuevoInicio == -1) return false;
 
-        // Escribir el contenido
         for (int i = 0; i < contenido.length(); i++) {
             disco.escribir(nuevoInicio + i, String.valueOf(contenido.charAt(i)));
         }
 
-        // Liberar bloque viejo
         disco.liberarBloqueArchivo(inicioViejo, tamanoViejo);
 
-        // Actualizar indice
         disco.eliminarDelIndice(nombre);
         return disco.registrarArchivo(nombre, nuevoInicio, nuevoInicio + contenido.length() - 1);
     }
 
-    /**
-     * Elimina un archivo: libera su bloque y lo quita del indice.
-     */
     private boolean eliminarArchivoDeDisco(String nombre) {
         if (!disco.existe(nombre)) return false;
 

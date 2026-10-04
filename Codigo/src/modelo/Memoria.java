@@ -4,221 +4,206 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Representa la memoria principal de la máquina virtual (Proyecto 1).
+ * Memoria principal de la maquina virtual (Proyecto 1).
  *
- * Se divide en dos zonas:
- *   - Zona kernel: posiciones [0, limiteKernelUsuario)
- *   - Zona usuario: posiciones [limiteKernelUsuario, tamanoMemoria)
+ * Se divide en DOS zonas:
+ *   - Zona KERNEL: posiciones [0, limiteKernelUsuario)
+ *   - Zona USUARIO: posiciones [limiteKernelUsuario, tamanoMemoria)
  *
- * Cada posición almacena un Object, ya que la memoria no distingue tipos:
- * puede contener una Instruccion, un BCP, un dato numérico, o null.
+ * La zona KERNEL contiene 3 SUB-ZONAS FIJAS (Stallings, seccion 3.3):
  *
- * Las primeras MAX_BCPS posiciones del kernel están reservadas para
- * almacenar los BCPs de los procesos (hasta 5 según el enunciado).
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │  ZONA KERNEL                                         │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │  ListaProcesos (Ready queue)                         │
+ *   │    → Direcciones de BCPs READY (5 posiciones)        │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │  BCPs                                                │
+ *   │    → maxProcesos × 30 posiciones                     │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │  TablaMemoria                                        │
+ *   │    → Bloques asignados (15 posiciones = 5 bloques)   │
+ *   └──────────────────────────────────────────────────────┘
+ *
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │  ZONA USUARIO                                        │
+ *   │    → Instrucciones de los procesos activos           │
+ *   └──────────────────────────────────────────────────────┘
+ *
+ * El limiteKernelUsuario se CALCULA automaticamente segun las 3 zonas.
  */
 public class Memoria {
 
-    /** Tamaño mínimo permitido para una memoria (en posiciones). */
-    public static final int TAMANO_MINIMO = 128;
+    /* ==================== TAMANOS FIJOS ==================== */
 
-    /** Cantidad máxima de BCPs (5 procesos según el enunciado). */
-    public static final int MAX_BCPS = 5;                              
+    public static final int TAMANO_LISTA_PROCESOS = 5;
+    public static final int TAMANO_TABLA_MEMORIA   = 15;
+    public static final int MAX_BCPS               = 5;
 
-    /** Primera posición del kernel reservada para BCPs. */
-    private static final int INICIO_ZONA_BCPS = 0;                     
+    /** Tamano minimo: 3 zonas + al menos 2 posiciones de usuario. */
+    public static final int TAMANO_MINIMO =
+            TAMANO_LISTA_PROCESOS + (MAX_BCPS * BCP.POSICIONES_REQUERIDAS)
+            + TAMANO_TABLA_MEMORIA + 2;
 
-    private int tamanoMemoria;         // cantidad total de posiciones
-    private int limiteKernelUsuario;   // primera posición de la zona usuario
-    private Object[] arregloMemoria;   // contenido de cada posición
+    /* ==================== ZONAS (calculadas) ==================== */
 
-    /**
-     * Crea una memoria con el tamaño y límite indicados.
-     *
-     * @param tamanoMemoria       cantidad total de posiciones (>= TAMANO_MINIMO)
-     * @param limiteKernelUsuario primera posición de la zona usuario
-     * @throws IllegalArgumentException si tamanoMemoria < TAMANO_MINIMO
-     *                                  o si el límite es inválido
-     */
-    public Memoria(int tamanoMemoria, int limiteKernelUsuario) {
-        if (tamanoMemoria < TAMANO_MINIMO) {
-            throw new IllegalArgumentException("Tamaño de memoria menor a " + TAMANO_MINIMO);
+    private final int inicioListaProcesos;
+    private final int finListaProcesos;
+
+    private final int inicioBCPs;
+    private final int finBCPs;
+
+    private final int inicioTablaMemoria;
+    private final int finTablaMemoria;
+
+    private final int limiteKernelUsuario;
+
+    /* ==================== DATOS ==================== */
+
+    private final int tamanoMemoria;
+    private final int maxProcesos;
+    private final Object[] arregloMemoria;
+
+    /* ==================== CONSTRUCTOR ==================== */
+
+    public Memoria(int tamanoMemoria, int maxProcesos) {
+        if (maxProcesos < 1) {
+            throw new IllegalArgumentException("maxProcesos debe ser al menos 1");
         }
-        if (limiteKernelUsuario > tamanoMemoria) {
+
+        int tamanoBCPs = maxProcesos * BCP.POSICIONES_REQUERIDAS;
+        int tamanoKernel = TAMANO_LISTA_PROCESOS + tamanoBCPs + TAMANO_TABLA_MEMORIA;
+
+        if (tamanoMemoria < tamanoKernel + 2) {
             throw new IllegalArgumentException(
-                "El límite kernel/usuario no puede superar el tamaño total");
+                "Memoria muy pequena: kernel necesita " + tamanoKernel
+                + " posiciones + al menos 2 de usuario. Total minimo: "
+                + (tamanoKernel + 2));
         }
-        if (limiteKernelUsuario < MAX_BCPS) {
-            throw new IllegalArgumentException(
-                "La zona kernel debe tener al menos " + MAX_BCPS
-                + " posiciones para almacenar BCPs");
-        }
+
         this.tamanoMemoria = tamanoMemoria;
-        this.limiteKernelUsuario = limiteKernelUsuario;
+        this.maxProcesos = maxProcesos;
         this.arregloMemoria = new Object[tamanoMemoria];
+
+        // Calcular limites de cada zona
+        this.inicioListaProcesos = 0;
+        this.finListaProcesos = inicioListaProcesos + TAMANO_LISTA_PROCESOS - 1;
+
+        this.inicioBCPs = finListaProcesos + 1;
+        this.finBCPs = inicioBCPs + tamanoBCPs - 1;
+
+        this.inicioTablaMemoria = finBCPs + 1;
+        this.finTablaMemoria = inicioTablaMemoria + TAMANO_TABLA_MEMORIA - 1;
+
+        this.limiteKernelUsuario = finTablaMemoria + 1;
     }
 
-    /* ==================== ESCRITURA / LECTURA GENÉRICA ==================== */
+    /* ==================== ACCESO GENERICO ==================== */
 
-    /**
-     * Escribe un valor en una posición de memoria.
-     *
-     * @param posicionMemoria índice donde escribir
-     * @param valor           valor a almacenar (Instruccion, BCP, u otro Object)
-     */
-    public void escribir(int posicionMemoria, Object valor) {
-        arregloMemoria[posicionMemoria] = valor;
+    public void escribir(int posicion, Object valor) {
+        arregloMemoria[posicion] = valor;
     }
 
-    /**
-     * Lee el valor almacenado en una posición de memoria.
-     *
-     * @param posicionMemoria índice a leer
-     * @return el valor almacenado en esa posición (requiere casting)
-     */
-    public Object leer(int posicionMemoria) {
-        return arregloMemoria[posicionMemoria];
+    public Object leer(int posicion) {
+        return arregloMemoria[posicion];
     }
 
-    /* ==================== LECTURA TIPADA ==================== */   
-
-    /**
-     * Lee una posición como Instruccion (con casting seguro).
-     *
-     * @param posicion índice a leer
-     * @return la Instruccion en esa posición, o null si está vacía
-     * @throws ClassCastException si la posición no contiene una Instruccion
-     */
     public Instruccion leerInstruccion(int posicion) {
         Object valor = arregloMemoria[posicion];
-        if (valor == null) {
-            return null;
-        }
+        if (valor == null) return null;
         if (!(valor instanceof Instruccion)) {
             throw new ClassCastException(
-                "La posición " + posicion + " no contiene una Instruccion, sino "
+                "La posicion " + posicion + " no contiene una Instruccion, sino "
                 + valor.getClass().getSimpleName());
         }
         return (Instruccion) valor;
     }
 
-    /**
-     * Lee una posición como BCP (con casting seguro).
-     *
-     * @param posicion índice a leer
-     * @return el BCP en esa posición, o null si está vacía
-     * @throws ClassCastException si la posición no contiene un BCP
-     */
     public BCP leerBCP(int posicion) {
         Object valor = arregloMemoria[posicion];
-        if (valor == null) {
-            return null;
-        }
+        if (valor == null) return null;
         if (!(valor instanceof BCP)) {
             throw new ClassCastException(
-                "La posición " + posicion + " no contiene un BCP, sino "
+                "La posicion " + posicion + " no contiene un BCP, sino "
                 + valor.getClass().getSimpleName());
         }
         return (BCP) valor;
     }
 
-    /* ==================== GESTIÓN DE BCPs ==================== */   // ← NUEVO
+    /* ==================== ZONA 1: LISTA DE PROCESOS ==================== */
 
-    /**
-     * Registra un BCP en la primera posición libre de la zona de BCPs.
-     * Le asigna su dirección al BCP y lo guarda en memoria.
-     *
-     * @param bcp BCP a registrar
-     * @return la dirección asignada
-     * @throws IllegalStateException si ya hay MAX_BCPS BCPs registrados
-     */
-    public int registrarBCP(BCP bcp) {
-        for (int i = 0; i < MAX_BCPS; i++) {
-            int pos = INICIO_ZONA_BCPS + i;
-            if (arregloMemoria[pos] == null) {
-                arregloMemoria[pos] = bcp;
-                bcp.setDireccion(pos);
-                return pos;
+    public int getInicioListaProcesos() { return inicioListaProcesos; }
+    public int getFinListaProcesos()    { return finListaProcesos; }
+    public int getTamanoListaProcesos() { return TAMANO_LISTA_PROCESOS; }
+
+    public void escribirListaProcesos(int i, Object valor) {
+        if (i < 0 || i >= TAMANO_LISTA_PROCESOS) {
+            throw new IndexOutOfBoundsException("Indice fuera de ListaProcesos: " + i);
+        }
+        arregloMemoria[inicioListaProcesos + i] = valor;
+    }
+
+    public Object leerListaProcesos(int i) {
+        if (i < 0 || i >= TAMANO_LISTA_PROCESOS) {
+            throw new IndexOutOfBoundsException("Indice fuera de ListaProcesos: " + i);
+        }
+        return arregloMemoria[inicioListaProcesos + i];
+    }
+
+    /* ==================== ZONA 2: BCPs ==================== */
+
+    public int getInicioBCPs() { return inicioBCPs; }
+    public int getFinBCPs()    { return finBCPs; }
+    public int getMaxProcesos() { return maxProcesos; }
+
+    public int reservarBloqueBCP() {
+        for (int inicio = inicioBCPs;
+             inicio + BCP.POSICIONES_REQUERIDAS - 1 <= finBCPs;
+             inicio += BCP.POSICIONES_REQUERIDAS) {
+            boolean libre = true;
+            for (int i = 0; i < BCP.POSICIONES_REQUERIDAS; i++) {
+                if (arregloMemoria[inicio + i] != null) {
+                    libre = false;
+                    break;
+                }
             }
+            if (libre) return inicio;
         }
-        throw new IllegalStateException(
-            "No se pueden registrar más de " + MAX_BCPS + " procesos");
+        return -1;
     }
 
-    /**
-     * @return cantidad actual de BCPs registrados.
-     */
-    public int getCantidadBCPs() {
-        int contador = 0;
-        for (int i = 0; i < MAX_BCPS; i++) {
-            if (arregloMemoria[INICIO_ZONA_BCPS + i] instanceof BCP) {
-                contador++;
-            }
-        }
-        return contador;
-    }
-
-    /**
-     * @return lista de BCPs registrados actualmente, en orden de dirección.
-     */
-    public List<BCP> getBCPsRegistrados() {
-        List<BCP> lista = new ArrayList<>();
-        for (int i = 0; i < MAX_BCPS; i++) {
-            Object obj = arregloMemoria[INICIO_ZONA_BCPS + i];
-            if (obj instanceof BCP) {
-                lista.add((BCP) obj);
-            }
-        }
-        return lista;
-    }
-
-    /**
-     * Libera la posición de un BCP (por ejemplo, cuando un proceso termina).
-     *
-     * @param direccionBCP dirección del BCP a liberar
-     */
-    public void liberarBCP(int direccionBCP) {
-        if (direccionBCP >= INICIO_ZONA_BCPS
-                && direccionBCP < INICIO_ZONA_BCPS + MAX_BCPS) {
-            arregloMemoria[direccionBCP] = null;
+    public void liberarBloqueBCP(int direccionBase) {
+        for (int i = 0; i < BCP.POSICIONES_REQUERIDAS; i++) {
+            arregloMemoria[direccionBase + i] = null;
         }
     }
 
-    /* ==================== ZONAS ==================== */
+    /* ==================== ZONA 3: TABLA DE MEMORIA ==================== */
 
-    /**
-     * Indica si una posición pertenece a la zona kernel.
-     *
-     * @param posicion índice a evaluar
-     * @return true si la posición está en la zona kernel
-     */
-    public boolean esZonaKernel(int posicion) {
-        return posicion < limiteKernelUsuario;
+    public int getInicioTablaMemoria() { return inicioTablaMemoria; }
+    public int getFinTablaMemoria()    { return finTablaMemoria; }
+
+    public void escribirTablaMemoria(int i, Object valor) {
+        if (i < 0 || i >= TAMANO_TABLA_MEMORIA) {
+            throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
+        }
+        arregloMemoria[inicioTablaMemoria + i] = valor;
     }
 
-    /**
-     * Verifica si un programa de usuario de cierto tamaño cabe
-     * en el espacio disponible de la zona usuario.
-     *
-     * @param cantidadPosiciones posiciones que requiere el programa
-     * @return true si hay espacio suficiente
-     */
-    public boolean cabeProgramaDeUsuario(int cantidadPosiciones) {
-        return cantidadPosiciones <= getEspacioUsuarioDisponible();
+    public Object leerTablaMemoria(int i) {
+        if (i < 0 || i >= TAMANO_TABLA_MEMORIA) {
+            throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
+        }
+        return arregloMemoria[inicioTablaMemoria + i];
     }
-  
-    /* ==================== GESTIÓN DE BLOQUES ==================== */
 
-    /**
-     * Busca un bloque de N posiciones consecutivas libres en la zona kernel.
-     *
-     * @param tamano cantidad de posiciones consecutivas necesarias
-     * @return la dirección base del bloque (primera posición), o -1 si no hay
-     */
-    public int reservarBloque(int tamano) {
+    /* ==================== ZONA USUARIO ==================== */
+
+    public int reservarBloqueUsuario(int tamano) {
         if (tamano <= 0) {
-            throw new IllegalArgumentException("El tamaño del bloque debe ser > 0");
+            throw new IllegalArgumentException("El tamano del bloque debe ser > 0");
         }
-        for (int inicio = 0; inicio <= limiteKernelUsuario - tamano; inicio++) {
+        for (int inicio = limiteKernelUsuario; inicio <= tamanoMemoria - tamano; inicio++) {
             boolean libre = true;
             for (int i = 0; i < tamano; i++) {
                 if (arregloMemoria[inicio + i] != null) {
@@ -226,44 +211,42 @@ public class Memoria {
                     break;
                 }
             }
-            if (libre) {
-                return inicio;
-            }
+            if (libre) return inicio;
         }
         return -1;
     }
 
-    /**
-     * Libera un bloque de N posiciones consecutivas.
-     *
-     * @param direccionBase posición inicial del bloque
-     * @param tamano        cantidad de posiciones a liberar
-     */
-    public void liberarBloque(int direccionBase, int tamano) {
+    public void liberarBloqueUsuario(int direccionBase, int tamano) {
         for (int i = 0; i < tamano; i++) {
             arregloMemoria[direccionBase + i] = null;
         }
     }
 
-    /* ==================== GETTERS ==================== */
+    /* ==================== CONSULTAS ==================== */
 
-    public int getTamanoMemoria() {
-        return tamanoMemoria;
+    public boolean esZonaKernel(int posicion) {
+        return posicion < limiteKernelUsuario;
     }
 
-    public int getLimiteKernelUsuario() {
+    public boolean cabeProgramaDeUsuario(int cantidadPosiciones) {
+        return cantidadPosiciones <= getEspacioUsuarioDisponible();
+    }
+
+    public int getTamanoMemoria() { return tamanoMemoria; }
+    public int getLimiteKernelUsuario() { return limiteKernelUsuario; }
+    public Object[] getArregloMemoria() { return arregloMemoria; }
+
+    public int getEspacioUsuarioDisponible() {
+        return tamanoMemoria - limiteKernelUsuario;
+    }
+
+    public int getTamanoKernel() {
         return limiteKernelUsuario;
     }
 
-    public Object[] getArregloMemoria() {
-        return arregloMemoria;
-    }
-
-    /**
-     * @return cantidad de posiciones disponibles en la zona usuario
-     *         (tamanoMemoria - limiteKernelUsuario)
-     */
-    public int getEspacioUsuarioDisponible() {
-        return tamanoMemoria - limiteKernelUsuario;
+    @Override
+    public String toString() {
+        return "Memoria[" + tamanoMemoria + " pos, kernel=0-" + (limiteKernelUsuario - 1)
+                + ", usuario=" + limiteKernelUsuario + "-" + (tamanoMemoria - 1) + "]";
     }
 }

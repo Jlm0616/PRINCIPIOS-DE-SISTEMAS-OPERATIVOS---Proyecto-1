@@ -2,30 +2,50 @@ package logica;
 
 import modelo.BCP;
 import modelo.EstadoProceso;
+import modelo.Memoria;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Lista de procesos: cola FCFS de BCPs que estan en RAM.
  *
- * Incluye procesos en estado READY, RUNNING y BLOCKED.
- * El planificador elige el primero READY.
+ * Esta lista NO es una LinkedList en Java: es una VISTA sobre una
+ * zona del kernel en la Memoria (Stallings, seccion 3.3, "Memory Tables"
+ * y "Process Tables").
  *
- * El campo siguienteBCP del BCP se mantiene como informativo:
- * guarda la direccion del siguiente BCP en el kernel, para que la
- * GUI pueda visualizar el enlace.
+ * La zona ListaProcesos guarda PUNTEROS (direcciones base) a los BCPs
+ * que estan en estado READY. El campo cantidad indica cuantos punteros
+ * hay actualmente (0 a TAMANO_LISTA_PROCESOS).
  *
- * Esta clase SOLO gestiona la estructura. NO decide que proceso
- * ejecutar (eso es del Planificador) ni como ejecutarlo (Despachador).
+ * El primer BCP (indice 0) es el que se ejecutara a continuacion (FCFS).
+ *
+ * El campo siguienteBCP del BCP se actualiza como informativo, para que
+ * la GUI pueda visualizar el enlace en memoria.
  */
 public class ListaProcesos {
 
-    private final LinkedList<BCP> lista;
+    private final Memoria memoria;
+    private final int inicio;
+    private final int tamano;
 
-    public ListaProcesos() {
-        this.lista = new LinkedList<>();
+    /** Cantidad actual de punteros guardados (0 a tamano). */
+    private int cantidad;
+
+    /**
+     * Crea la ListaProcesos como vista sobre la zona de memoria.
+     */
+    public ListaProcesos(Memoria memoria) {
+        if (memoria == null) {
+            throw new IllegalArgumentException("La memoria no puede ser nula");
+        }
+        this.memoria = memoria;
+        this.inicio = memoria.getInicioListaProcesos();
+        this.tamano = memoria.getTamanoListaProcesos();
+        this.cantidad = 0;
     }
+
+    /* ==================== OPERACIONES ==================== */
 
     /**
      * Agrega un BCP al final de la lista (FCFS).
@@ -34,83 +54,190 @@ public class ListaProcesos {
         if (bcp == null) {
             throw new IllegalArgumentException("No se puede agregar un BCP nulo");
         }
+        if (cantidad >= tamano) {
+            throw new IllegalStateException(
+                "ListaProcesos llena (" + tamano + " posiciones)");
+        }
+
         bcp.setEstado(EstadoProceso.READY);
-        lista.addLast(bcp);
+        int dir = bcp.getDireccionBase();
+        memoria.escribirListaProcesos(cantidad, dir);
+        cantidad++;
         actualizarEnlaces();
     }
 
     /**
      * Agrega un BCP al PRINCIPIO de la lista.
-     * Se usa cuando un proceso bloqueado se desbloquea y debe
-     * retomar su lugar original en FCFS puro.
      */
     public void agregarAlPrincipio(BCP bcp) {
         if (bcp == null) {
             throw new IllegalArgumentException("No se puede agregar un BCP nulo");
         }
+        if (cantidad >= tamano) {
+            throw new IllegalStateException(
+                "ListaProcesos llena (" + tamano + " posiciones)");
+        }
+
+        // Desplazar todos hacia la derecha
+        for (int i = cantidad - 1; i >= 0; i--) {
+            Object v = memoria.leerListaProcesos(i);
+            memoria.escribirListaProcesos(i + 1, v);
+        }
+
         bcp.setEstado(EstadoProceso.READY);
-        lista.addFirst(bcp);
+        int dir = bcp.getDireccionBase();
+        memoria.escribirListaProcesos(0, dir);
+        cantidad++;
         actualizarEnlaces();
     }
 
     /**
      * Saca y devuelve el primer BCP de la lista (FCFS).
+     * Construye un BCP VISTA sobre la direccion guardada.
      */
     public BCP sacarPrimero() {
-        if (lista.isEmpty()) {
+        if (cantidad == 0) return null;
+
+        Object dir = memoria.leerListaProcesos(0);
+        if (dir == null) {
+            cantidad = 0;
             return null;
         }
-        BCP sacado = lista.removeFirst();
+        BCP bcp = new BCP(memoria, (Integer) dir);
+
+        // Desplazar todos hacia la izquierda
+        for (int i = 0; i < cantidad - 1; i++) {
+            Object v = memoria.leerListaProcesos(i + 1);
+            memoria.escribirListaProcesos(i, v);
+        }
+        memoria.escribirListaProcesos(cantidad - 1, null);
+        cantidad--;
         actualizarEnlaces();
-        return sacado;
+        return bcp;
+    }
+
+    /**
+     * Saca y devuelve la DIRECCION del primer BCP de la lista (FCFS).
+     * NO construye el BCP: solo devuelve la direccion.
+     *
+     * @return la direccion base del primer BCP, o -1 si la lista esta vacia
+     */
+    public int sacarPrimeraDireccion() {
+        if (cantidad == 0) return -1;
+
+        Object dir = memoria.leerListaProcesos(0);
+        if (dir == null) {
+            cantidad = 0;
+            return -1;
+        }
+
+        // Desplazar todos hacia la izquierda
+        for (int i = 0; i < cantidad - 1; i++) {
+            Object v = memoria.leerListaProcesos(i + 1);
+            memoria.escribirListaProcesos(i, v);
+        }
+        memoria.escribirListaProcesos(cantidad - 1, null);
+        cantidad--;
+        actualizarEnlaces();
+        return (Integer) dir;
     }
 
     /**
      * Saca un BCP especifico de la lista (por ejemplo, cuando termina).
-     *
-     * @return true si se saco
      */
     public boolean sacar(BCP bcp) {
         if (bcp == null) return false;
-        boolean removido = lista.remove(bcp);
-        if (removido) actualizarEnlaces();
-        return removido;
+        int dir = bcp.getDireccionBase();
+
+        for (int i = 0; i < cantidad; i++) {
+            Object v = memoria.leerListaProcesos(i);
+            if (v != null && ((Integer) v) == dir) {
+                for (int j = i; j < cantidad - 1; j++) {
+                    Object sig = memoria.leerListaProcesos(j + 1);
+                    memoria.escribirListaProcesos(j, sig);
+                }
+                memoria.escribirListaProcesos(cantidad - 1, null);
+                cantidad--;
+                actualizarEnlaces();
+                return true;
+            }
+        }
+        return false;
     }
 
+    /**
+     * Devuelve (sin sacar) el primer BCP de la lista.
+     */
     public BCP verPrimero() {
-        return lista.isEmpty() ? null : lista.getFirst();
+        if (cantidad == 0) return null;
+        Object dir = memoria.leerListaProcesos(0);
+        if (dir == null) return null;
+        return new BCP(memoria, (Integer) dir);
     }
 
-    public boolean estaVacia() {
-        return lista.isEmpty();
-    }
+    /* ==================== CONSULTAS ==================== */
 
-    public int getCantidad() {
-        return lista.size();
-    }
+    public boolean estaVacia() { return cantidad == 0; }
+    public int getCantidad()   { return cantidad; }
 
     public boolean contiene(BCP bcp) {
-        return lista.contains(bcp);
+        if (bcp == null) return false;
+        int dir = bcp.getDireccionBase();
+        for (int i = 0; i < cantidad; i++) {
+            Object v = memoria.leerListaProcesos(i);
+            if (v != null && ((Integer) v) == dir) return true;
+        }
+        return false;
     }
 
     public List<BCP> toList() {
-        return new java.util.ArrayList<>(lista);
+        List<BCP> lista = new ArrayList<>();
+        for (int i = 0; i < cantidad; i++) {
+            Object dir = memoria.leerListaProcesos(i);
+            if (dir != null) {
+                lista.add(new BCP(memoria, (Integer) dir));
+            }
+        }
+        return lista;
     }
 
+    public List<Integer> getDirecciones() {
+        List<Integer> dirs = new ArrayList<>();
+        for (int i = 0; i < cantidad; i++) {
+            Object dir = memoria.leerListaProcesos(i);
+            if (dir != null) dirs.add((Integer) dir);
+        }
+        return dirs;
+    }
+
+    /* ==================== HELPERS ==================== */
+
+    /**
+     * Actualiza el campo siguienteBCP de cada BCP para reflejar el enlace.
+     */
     private void actualizarEnlaces() {
-        for (int i = 0; i < lista.size(); i++) {
-            BCP actual = lista.get(i);
-            if (i + 1 < lista.size()) {
-                BCP siguiente = lista.get(i + 1);
-                actual.setSiguienteBCP(siguiente.getDireccionBase());
+        for (int i = 0; i < cantidad; i++) {
+            Object dir = memoria.leerListaProcesos(i);
+            if (dir == null) continue;
+            BCP actual = new BCP(memoria, (Integer) dir);
+
+            if (i + 1 < cantidad) {
+                Object sig = memoria.leerListaProcesos(i + 1);
+                actual.setSiguienteBCP((sig != null) ? (Integer) sig : -1);
             } else {
                 actual.setSiguienteBCP(-1);
             }
         }
     }
 
+    /* ==================== GETTERS ==================== */
+
+    public int getInicioMemoria() { return inicio; }
+    public int getTamanoMemoria() { return tamano; }
+    public Memoria getMemoria()   { return memoria; }
+
     @Override
     public String toString() {
-        return "ListaProcesos[" + lista.size() + " procesos en RAM]";
+        return "ListaProcesos[" + cantidad + "/" + tamano + " en RAM]";
     }
 }

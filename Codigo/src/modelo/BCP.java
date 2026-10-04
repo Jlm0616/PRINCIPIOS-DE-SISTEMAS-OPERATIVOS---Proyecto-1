@@ -27,53 +27,68 @@ import java.util.Stack;
  *   10 = Overflow
  *   11 = BanderaIgual
  *   12 = PesoPendiente
- *   13 = Pila
- *   14 = Base
- *   15 = Alcance
- *   16 = TiempoInicio
- *   17 = TiempoFin
- *   18 = CPU Asignado
- *   19 = ArchivosAbiertos
- *   20 = Siguiente BCP (direccion de memoria)
- *   21 = Direccion (donde vive este BCP)
+ *   13 = Pila[0]           ← INICIO PILA (5 posiciones)
+ *   14 = Pila[1]
+ *   15 = Pila[2]
+ *   16 = Pila[3]
+ *   17 = Pila[4]           ← FIN PILA
+ *   18 = Base
+ *   19 = Alcance
+ *   20 = TiempoInicio
+ *   21 = TiempoFin
+ *   22 = CPU Asignado
+ *   23 = ArchivoAbierto[0] ← INICIO ARCHIVOS (5 posiciones)
+ *   24 = ArchivoAbierto[1]
+ *   25 = ArchivoAbierto[2]
+ *   26 = ArchivoAbierto[3]
+ *   27 = ArchivoAbierto[4] ← FIN ARCHIVOS
+ *   28 = Siguiente BCP
+ *   29 = Direccion
  *
- * AH y AL no son campos propios: son las dos mitades de AX (como en
- * la arquitectura x86). Se acceden mediante getAh/setAh/getAl/setAl.
+ * Hay dos formas de crear un BCP:
+ *   1. new BCP(memoria, direccionBase, id, prioridad) → INICIALIZA los campos.
+ *   2. new BCP(memoria, direccionBase)                → VISTA sobre BCP existente.
  */
 public class BCP {
 
     public static final int TAMANO_MAXIMO_PILA = 5;
-    public static final int POSICIONES_REQUERIDAS = 22;
+    public static final int TAMANO_MAXIMO_ARCHIVOS = 5;
+    public static final int POSICIONES_REQUERIDAS = 30;
 
-    private static final int OFF_ID             = 0;
-    private static final int OFF_ESTADO         = 1;
-    private static final int OFF_PRIORIDAD      = 2;
-    private static final int OFF_PC             = 3;
-    private static final int OFF_IR             = 4;
-    private static final int OFF_AC             = 5;
-    private static final int OFF_AX             = 6;
-    private static final int OFF_BX             = 7;
-    private static final int OFF_CX             = 8;
-    private static final int OFF_DX             = 9;
-    private static final int OFF_OVERFLOW       = 10;
-    private static final int OFF_BANDERA_IGUAL  = 11;
-    private static final int OFF_PESO_PENDIENTE = 12;
-    private static final int OFF_PILA           = 13;
-    private static final int OFF_BASE           = 14;
-    private static final int OFF_ALCANCE        = 15;
-    private static final int OFF_TIEMPO_INICIO  = 16;
-    private static final int OFF_TIEMPO_FIN     = 17;
-    private static final int OFF_CPU_ASIGNADO   = 18;
-    private static final int OFF_ARCHIVOS       = 19;
-    private static final int OFF_SIGUIENTE_BCP  = 20;
-    private static final int OFF_DIRECCION      = 21;
+    public static final int OFF_ID             = 0;
+    public static final int OFF_ESTADO         = 1;
+    public static final int OFF_PRIORIDAD      = 2;
+    public static final int OFF_PC             = 3;
+    public static final int OFF_IR             = 4;
+    public static final int OFF_AC             = 5;
+    public static final int OFF_AX             = 6;
+    public static final int OFF_BX             = 7;
+    public static final int OFF_CX             = 8;
+    public static final int OFF_DX             = 9;
+    public static final int OFF_OVERFLOW       = 10;
+    public static final int OFF_BANDERA_IGUAL  = 11;
+    public static final int OFF_PESO_PENDIENTE = 12;
+
+    public static final int OFF_PILA_INICIO    = 13;
+
+    public static final int OFF_BASE           = 18;
+    public static final int OFF_ALCANCE        = 19;
+    public static final int OFF_TIEMPO_INICIO  = 20;
+    public static final int OFF_TIEMPO_FIN     = 21;
+    public static final int OFF_CPU_ASIGNADO   = 22;
+
+    public static final int OFF_ARCHIVOS_INICIO = 23;
+
+    public static final int OFF_SIGUIENTE_BCP  = 28;
+    public static final int OFF_DIRECCION      = 29;
 
     private final Memoria memoria;
     private final int direccionBase;
 
     /**
-     * Crea un BCP que ocupa POSICIONES_REQUERIDAS posiciones consecutivas
-     * del kernel a partir de direccionBase.
+     * Crea un BCP NUEVO que ocupa POSICIONES_REQUERIDAS posiciones
+     * consecutivas del kernel a partir de direccionBase.
+     * INICIALIZA todos los campos con valores por defecto.
      */
     public BCP(Memoria memoria, int direccionBase, int id, int prioridad) {
         this.memoria = memoria;
@@ -92,15 +107,34 @@ public class BCP {
         setOverflow(false);
         setBanderaIgual(false);
         setPesoPendiente(0);
-        setPila(new Stack<>());
+
+        // Limpiar las 5 posiciones de la pila
+        for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
+            escribir(OFF_PILA_INICIO + i, null);
+        }
+
         setBase(0);
         setAlcance(0);
         setTiempoInicio(null);
         setTiempoFin(null);
         setCpuAsignado(-1);
-        setArchivosAbiertos(new ArrayList<>());
+
+        // Limpiar las 5 posiciones de archivos abiertos
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            escribir(OFF_ARCHIVOS_INICIO + i, null);
+        }
+
         setSiguienteBCP(-1);
         setDireccion(direccionBase);
+    }
+
+    /**
+     * Crea una VISTA sobre un BCP que YA EXISTE en memoria.
+     * NO inicializa ningun campo: solo apunta a la direccion dada.
+     */
+    public BCP(Memoria memoria, int direccionBase) {
+        this.memoria = memoria;
+        this.direccionBase = direccionBase;
     }
 
     /* ============ ACCESO A MEMORIA ============ */
@@ -113,21 +147,8 @@ public class BCP {
         memoria.escribir(direccionBase + offset, valor);
     }
 
-    /* ============ EXTRACCIÓN / RESTAURACIÓN (para swap) ============ */
+    /* ============ EXTRACCIÓN / RESTAURACIÓN ============ */
 
-    /**
-     * Extrae los 22 valores del BCP como un arreglo de Object.
-     *
-     * Se usa al suspender un proceso: los valores se guardan en el
-     * ProcesoEnEspera (dentro del swap), y el bloque del BCP se libera
-     * del kernel. Esto respeta el modelo de Stallings (sección 3.3):
-     * el BCP es parte del process image y se mueve COMPLETO a swap.
-     *
-     * El orden del arreglo corresponde a los offsets:
-     *   [0]=ID, [1]=Estado, [2]=Prioridad, ..., [21]=Dirección.
-     *
-     * @return Object[] con los 22 valores del BCP
-     */
     public Object[] extraerValores() {
         Object[] valores = new Object[POSICIONES_REQUERIDAS];
         for (int i = 0; i < POSICIONES_REQUERIDAS; i++) {
@@ -136,17 +157,6 @@ public class BCP {
         return valores;
     }
 
-    /**
-     * Restaura los 22 valores del BCP desde un arreglo de Object.
-     *
-     * Se usa al reactivar un proceso suspendido: se reserva un bloque
-     * nuevo en kernel y se escriben en él los valores guardados en el
-     * swap.
-     *
-     * @param valores Object[] con exactamente 22 valores
-     * @throws IllegalArgumentException si el arreglo es null o no tiene
-     *         POSICIONES_REQUERIDAS elementos
-     */
     public void restaurarValores(Object[] valores) {
         if (valores == null || valores.length != POSICIONES_REQUERIDAS) {
             throw new IllegalArgumentException(
@@ -157,18 +167,6 @@ public class BCP {
         }
     }
 
-    /**
-     * Crea un arreglo con los valores iniciales de un BCP que se
-     * suspende directamente (sin haber estado nunca en kernel).
-     *
-     * Se usa cuando un proceso recién cargado no cabe en memoria
-     * principal y se manda directamente al swap en estado READY_SUSPEND.
-     *
-     * @param id        identificador del proceso
-     * @param prioridad prioridad del proceso
-     * @param alcance   cantidad de instrucciones del proceso
-     * @return Object[] con 22 valores iniciales
-     */
     public static Object[] valoresIniciales(int id, int prioridad, int alcance) {
         Object[] valores = new Object[POSICIONES_REQUERIDAS];
         valores[OFF_ID]             = id;
@@ -184,13 +182,21 @@ public class BCP {
         valores[OFF_OVERFLOW]       = false;
         valores[OFF_BANDERA_IGUAL]  = false;
         valores[OFF_PESO_PENDIENTE] = 0;
-        valores[OFF_PILA]           = new Stack<Integer>();
+
+        for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
+            valores[OFF_PILA_INICIO + i] = null;
+        }
+
         valores[OFF_BASE]           = 0;
         valores[OFF_ALCANCE]        = alcance;
         valores[OFF_TIEMPO_INICIO]  = null;
         valores[OFF_TIEMPO_FIN]     = null;
         valores[OFF_CPU_ASIGNADO]   = -1;
-        valores[OFF_ARCHIVOS]       = new ArrayList<String>();
+
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            valores[OFF_ARCHIVOS_INICIO + i] = null;
+        }
+
         valores[OFF_SIGUIENTE_BCP]  = -1;
         valores[OFF_DIRECCION]      = -1;
         return valores;
@@ -222,25 +228,136 @@ public class BCP {
         cpu.setBanderaIgual(getBanderaIgual());
     }
 
-    /* ============ PILA ============ */
+    /* ============ PILA (5 posiciones) ============ */
 
     public void apilar(int valor) {
-        Stack<Integer> pila = getPila();
-        if (pila.size() >= TAMANO_MAXIMO_PILA) {
-            throw new IllegalStateException(
-                "Desbordamiento de pila en el proceso " + getId()
-                + " (máximo " + TAMANO_MAXIMO_PILA + " elementos)");
+        for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
+            int off = OFF_PILA_INICIO + i;
+            if (leer(off) == null) {
+                escribir(off, valor);
+                return;
+            }
         }
-        pila.push(valor);
+        throw new IllegalStateException(
+            "Desbordamiento de pila en el proceso " + getId()
+            + " (maximo " + TAMANO_MAXIMO_PILA + " elementos)");
     }
 
     public int desapilar() {
-        Stack<Integer> pila = getPila();
-        if (pila.isEmpty()) {
-            throw new IllegalStateException(
-                "Subdesbordamiento de pila en el proceso " + getId() + " (pila vacía)");
+        for (int i = TAMANO_MAXIMO_PILA - 1; i >= 0; i--) {
+            int off = OFF_PILA_INICIO + i;
+            Object v = leer(off);
+            if (v != null) {
+                escribir(off, null);
+                return (Integer) v;
+            }
         }
-        return pila.pop();
+        throw new IllegalStateException(
+            "Subdesbordamiento de pila en el proceso " + getId() + " (pila vacia)");
+    }
+
+    public Stack<Integer> getPila() {
+        Stack<Integer> pila = new Stack<>();
+        for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
+            Object v = leer(OFF_PILA_INICIO + i);
+            if (v != null) pila.push((Integer) v);
+        }
+        return pila;
+    }
+
+    public void setPila(Stack<Integer> pila) {
+        if (pila == null) pila = new Stack<>();
+        if (pila.size() > TAMANO_MAXIMO_PILA) {
+            throw new IllegalArgumentException(
+                "La pila no puede tener mas de " + TAMANO_MAXIMO_PILA + " elementos");
+        }
+        for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
+            escribir(OFF_PILA_INICIO + i, null);
+        }
+        int i = 0;
+        for (Integer v : pila) {
+            escribir(OFF_PILA_INICIO + i, v);
+            i++;
+        }
+    }
+
+    /* ============ ARCHIVOS ABIERTOS (5 posiciones) ============ */
+
+    /**
+     * Abre un archivo: lo agrega a la primera posicion libre.
+     *
+     * @return true si se abrio, false si ya estaba o si la lista esta llena
+     */
+    public boolean abrirArchivo(String nombre) {
+        if (nombre == null || nombre.isEmpty()) return false;
+
+        // Verificar si ya esta abierto
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            Object v = leer(OFF_ARCHIVOS_INICIO + i);
+            if (v != null && v.equals(nombre)) {
+                return false;   // ya abierto
+            }
+        }
+
+        // Buscar primer hueco
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            int off = OFF_ARCHIVOS_INICIO + i;
+            if (leer(off) == null) {
+                escribir(off, nombre);
+                return true;
+            }
+        }
+        return false;   // lista llena
+    }
+
+    /**
+     * Cierra un archivo: lo quita de la lista.
+     *
+     * @return true si se cerro, false si no estaba
+     */
+    public boolean cerrarArchivo(String nombre) {
+        if (nombre == null) return false;
+
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            int off = OFF_ARCHIVOS_INICIO + i;
+            Object v = leer(off);
+            if (v != null && v.equals(nombre)) {
+                escribir(off, null);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return la lista de archivos abiertos (solo los no-null).
+     */
+    public List<String> getArchivosAbiertos() {
+        List<String> lista = new ArrayList<>();
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            Object v = leer(OFF_ARCHIVOS_INICIO + i);
+            if (v != null) lista.add((String) v);
+        }
+        return lista;
+    }
+
+    /**
+     * Reemplaza la lista completa de archivos abiertos.
+     */
+    public void setArchivosAbiertos(List<String> archivos) {
+        for (int i = 0; i < TAMANO_MAXIMO_ARCHIVOS; i++) {
+            escribir(OFF_ARCHIVOS_INICIO + i, null);
+        }
+        if (archivos == null) return;
+        if (archivos.size() > TAMANO_MAXIMO_ARCHIVOS) {
+            throw new IllegalArgumentException(
+                "No pueden haber mas de " + TAMANO_MAXIMO_ARCHIVOS + " archivos abiertos");
+        }
+        int i = 0;
+        for (String a : archivos) {
+            escribir(OFF_ARCHIVOS_INICIO + i, a);
+            i++;
+        }
     }
 
     /* ============ TIEMPOS ============ */
@@ -262,45 +379,17 @@ public class BCP {
         return Duration.between(inicio, fin).getSeconds();
     }
 
-    /* ============ AH / AL (partes de AX) ============ */
+    /* ============ AH / AL ============ */
 
-    /**
-     * Obtiene AH: byte alto de AX (bits 15-8).
-     * Equivalente al registro AH de x86.
-     *
-     * @return valor de AH (0-255)
-     */
-    public int getAh() {
-        return (getAx() >> 8) & 0xFF;
-    }
+    public int getAh() { return (getAx() >> 8) & 0xFF; }
 
-    /**
-     * Establece AH: modifica solo los 8 bits altos de AX.
-     * AL queda intacto.
-     *
-     * @param ah nuevo valor de AH (0-255)
-     */
     public void setAh(int ah) {
         int al = getAl();
         setAx(((ah & 0xFF) << 8) | al);
     }
 
-    /**
-     * Obtiene AL: byte bajo de AX (bits 7-0).
-     * Equivalente al registro AL de x86.
-     *
-     * @return valor de AL (0-255)
-     */
-    public int getAl() {
-        return getAx() & 0xFF;
-    }
+    public int getAl() { return getAx() & 0xFF; }
 
-    /**
-     * Establece AL: modifica solo los 8 bits bajos de AX.
-     * AH queda intacto.
-     *
-     * @param al nuevo valor de AL (0-255)
-     */
     public void setAl(int al) {
         int ah = getAh();
         setAx((ah << 8) | (al & 0xFF));
@@ -334,17 +423,11 @@ public class BCP {
 
     public int getPesoPendiente() { return (Integer) leer(OFF_PESO_PENDIENTE); }
 
-    @SuppressWarnings("unchecked")
-    public Stack<Integer> getPila() { return (Stack<Integer>) leer(OFF_PILA); }
-
     public int getBase() { return (Integer) leer(OFF_BASE); }
     public int getAlcance() { return (Integer) leer(OFF_ALCANCE); }
     public LocalDateTime getTiempoInicio() { return (LocalDateTime) leer(OFF_TIEMPO_INICIO); }
     public LocalDateTime getTiempoFin() { return (LocalDateTime) leer(OFF_TIEMPO_FIN); }
     public int getCpuAsignado() { return (Integer) leer(OFF_CPU_ASIGNADO); }
-
-    @SuppressWarnings("unchecked")
-    public List<String> getArchivosAbiertos() { return (List<String>) leer(OFF_ARCHIVOS); }
 
     public int getSiguienteBCP() { return (Integer) leer(OFF_SIGUIENTE_BCP); }
     public int getDireccion() { return (Integer) leer(OFF_DIRECCION); }
@@ -364,13 +447,11 @@ public class BCP {
     public void setOverflow(boolean overflow) { escribir(OFF_OVERFLOW, overflow); }
     public void setBanderaIgual(boolean banderaIgual) { escribir(OFF_BANDERA_IGUAL, banderaIgual); }
     public void setPesoPendiente(int pesoPendiente) { escribir(OFF_PESO_PENDIENTE, pesoPendiente); }
-    public void setPila(Stack<Integer> pila) { escribir(OFF_PILA, pila); }
     public void setBase(int base) { escribir(OFF_BASE, base); }
     public void setAlcance(int alcance) { escribir(OFF_ALCANCE, alcance); }
     public void setTiempoInicio(LocalDateTime tiempoInicio) { escribir(OFF_TIEMPO_INICIO, tiempoInicio); }
     public void setTiempoFin(LocalDateTime tiempoFin) { escribir(OFF_TIEMPO_FIN, tiempoFin); }
     public void setCpuAsignado(int cpuAsignado) { escribir(OFF_CPU_ASIGNADO, cpuAsignado); }
-    public void setArchivosAbiertos(List<String> archivosAbiertos) { escribir(OFF_ARCHIVOS, archivosAbiertos); }
     public void setSiguienteBCP(int siguienteBCP) { escribir(OFF_SIGUIENTE_BCP, siguienteBCP); }
     public void setDireccion(int direccion) { escribir(OFF_DIRECCION, direccion); }
 

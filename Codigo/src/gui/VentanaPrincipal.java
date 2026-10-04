@@ -40,8 +40,8 @@ public class VentanaPrincipal extends JFrame {
 
     private ConfiguracionExterna config;
 
+    // Valores actuales
     private int tamanoMemoriaActual;
-    private int limiteKernelActual;
     private int maxProcesosActual;
     private int tamanoDiscoActual;
     private int maxArchivosActual;
@@ -49,8 +49,8 @@ public class VentanaPrincipal extends JFrame {
 
     private Memoria memoria;
     private CPU cpu;
-    private ListaProcesos listaProcesos;      // procesos en RAM
-    private ListaDeTrabajos listaDeTrabajos;  // procesos en disco (NEW)
+    private ListaProcesos listaProcesos;
+    private ListaDeTrabajos listaDeTrabajos;
     private ParticionadorDinamico particionador;
     private GestorProcesos gestor;
     private Disco disco;
@@ -110,7 +110,6 @@ public class VentanaPrincipal extends JFrame {
 
     private void aplicarConfiguracion(ConfiguracionExterna config) {
         this.tamanoMemoriaActual = config.getMemoria();
-        this.limiteKernelActual = config.getKernel();
         this.maxProcesosActual = config.getMaxProcesos();
         this.tamanoDiscoActual = config.getDisco();
         this.maxArchivosActual = config.getMaxArchivos();
@@ -131,14 +130,18 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void inicializarSistema() {
-        memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual);
-        cpu = new CPU(limiteKernelActual);
+        memoria = new Memoria(tamanoMemoriaActual, maxProcesosActual);
+        cpu = new CPU(memoria.getLimiteKernelUsuario());
         disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
-        listaProcesos = new ListaProcesos();
+
+        listaProcesos = new ListaProcesos(memoria);
         listaDeTrabajos = new ListaDeTrabajos();
+
         particionador = new ParticionadorDinamico(
-                limiteKernelActual,
+                memoria,
+                memoria.getLimiteKernelUsuario(),
                 memoria.getEspacioUsuarioDisponible());
+
         gestor = new GestorProcesos(memoria, cpu,
                                     listaProcesos, listaDeTrabajos,
                                     particionador, disco);
@@ -435,7 +438,7 @@ public class VentanaPrincipal extends JFrame {
         VentanaConfiguracion dialogo = new VentanaConfiguracion(
                 this,
                 tamanoMemoriaActual,
-                limiteKernelActual,
+                memoria.getLimiteKernelUsuario(),
                 tamanoDiscoActual,
                 maxArchivosActual,
                 tamanoSwapActual);
@@ -445,36 +448,22 @@ public class VentanaPrincipal extends JFrame {
         if (!dialogo.isConfirmado()) return;
 
         int nuevoTamano = dialogo.getTamanoMemoria();
-        int nuevoLimite = dialogo.getLimiteKernel();
         int nuevoDisco  = dialogo.getTamanoDisco();
         int nuevoMaxArchivos = dialogo.getMaxArchivos();
         int nuevoSwap   = dialogo.getTamanoSwap();
 
         this.tamanoMemoriaActual = nuevoTamano;
-        this.limiteKernelActual = nuevoLimite;
         this.tamanoDiscoActual = nuevoDisco;
         this.maxArchivosActual = nuevoMaxArchivos;
         this.tamanoSwapActual = nuevoSwap;
 
         config.setMemoria(nuevoTamano);
-        config.setKernel(nuevoLimite);
         config.setDisco(nuevoDisco);
         config.setMaxArchivos(nuevoMaxArchivos);
         config.setMemoriaVirtual(nuevoSwap);
         config.guardar();
 
-        memoria = new Memoria(nuevoTamano, nuevoLimite);
-        cpu = new CPU(nuevoLimite);
-        disco = new Disco(nuevoDisco, nuevoMaxArchivos, nuevoSwap);
-        listaProcesos = new ListaProcesos();
-        listaDeTrabajos = new ListaDeTrabajos();
-        particionador = new ParticionadorDinamico(
-                nuevoLimite,
-                memoria.getEspacioUsuarioDisponible());
-        gestor = new GestorProcesos(memoria, cpu,
-                                    listaProcesos, listaDeTrabajos,
-                                    particionador, disco);
-
+        inicializarSistema();
         configurarCallbacks();
 
         panelPantalla.limpiar();
@@ -492,10 +481,11 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void mostrarMensajeConfiguracion() {
+        int limiteKernel = memoria.getLimiteKernelUsuario();
         panelPantalla.agregarMensaje(">> Configuracion aplicada:");
         panelPantalla.agregarMensaje(">>   Memoria: " + tamanoMemoriaActual + " posiciones");
-        panelPantalla.agregarMensaje(">>   Kernel: 0-" + (limiteKernelActual - 1)
-                + ", Usuario: " + limiteKernelActual + "-" + (tamanoMemoriaActual - 1));
+        panelPantalla.agregarMensaje(">>   Kernel: 0-" + (limiteKernel - 1)
+                + ", Usuario: " + limiteKernel + "-" + (tamanoMemoriaActual - 1));
         panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual
                 + " posiciones (maxArchivos=" + maxArchivosActual
                 + ", swap=" + tamanoSwapActual + ")");

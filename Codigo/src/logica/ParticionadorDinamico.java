@@ -1,52 +1,41 @@
 package logica;
 
+import modelo.Memoria;
+
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Estrategia de particionamiento DINAMICO de la zona usuario.
  *
- * A diferencia del particionamiento fijo, aca las particiones se
- * crean dinamicamente segun el tamaño del proceso. Se usa el
- * algoritmo FIRST-FIT (Stallings, seccion 7.2): se busca el primer
- * hueco libre donde quepa el proceso.
+ * Usa FIRST-FIT (Stallings, seccion 7.2).
  *
- * Cuando un proceso termina, su espacio se libera y se fusiona con
- * los huecos adyacentes (coalescing) para evitar fragmentacion.
+ * Cada asignacion/liberacion se sincroniza con la TablaMemoria del kernel.
+ * Cada bloque asignado ocupa 3 posiciones:
+ *   [0] = idProceso (Integer)
+ *   [1] = inicio    (Integer)
+ *   [2] = tamano    (Integer)
  *
- * Ventajas sobre el fijo:
- *   - No hay desperdicio interno (el proceso ocupa exactamente lo que necesita).
- *   - Se pueden cargar mas procesos si son pequeños.
- *
- * Desventajas:
- *   - Fragmentacion externa: pueden quedar huecos que no sirven
- *     para procesos grandes.
- *
- * Aislar esta logica permite reemplazarla por otra estrategia
- * (best-fit, worst-fit, paginacion) sin modificar GestorProcesos.
+ * Como TAMANO_TABLA_MEMORIA = 15, caben 5 bloques (uno por proceso).
  */
 public class ParticionadorDinamico {
 
-    /** Inicio de la zona usuario (primera posicion). */
+    /** Cuantas posiciones ocupa cada bloque en la TablaMemoria. */
+    public static final int POSICIONES_POR_BLOQUE = 3;
+
     private final int inicioZonaUsuario;
-
-    /** Fin de la zona usuario (exclusivo). */
     private final int finZonaUsuario;
-
-    /** Lista de huecos libres, ordenados por direccion. */
     private final List<BloqueLibre> bloquesLibres;
+    private final Memoria memoria;
 
-    /**
-     * Crea un particionador dinamico con toda la zona usuario libre.
-     *
-     * @param inicioZonaUsuario   primera posicion de la zona usuario
-     * @param espacioUsuarioDisponible cantidad de posiciones disponibles
-     */
-    public ParticionadorDinamico(int inicioZonaUsuario, int espacioUsuarioDisponible) {
+    public ParticionadorDinamico(Memoria memoria,
+                                  int inicioZonaUsuario,
+                                  int espacioUsuarioDisponible) {
         if (espacioUsuarioDisponible <= 0) {
             throw new IllegalArgumentException(
                 "El espacio de usuario debe ser mayor a 0");
         }
+        this.memoria = memoria;
         this.inicioZonaUsuario = inicioZonaUsuario;
         this.finZonaUsuario = inicioZonaUsuario + espacioUsuarioDisponible;
         this.bloquesLibres = new ArrayList<>();
@@ -55,16 +44,7 @@ public class ParticionadorDinamico {
 
     /* ==================== ASIGNACION ==================== */
 
-    /**
-     * Asigna un bloque de `tamano` posiciones usando FIRST-FIT.
-     *
-     * Busca el primer hueco libre donde quepa el proceso. Si lo
-     * encuentra, lo reduce (o lo elimina si queda exacto).
-     *
-     * @param tamano cantidad de posiciones necesarias
-     * @return la direccion base del bloque asignado, o -1 si no hay hueco
-     */
-    public int asignarParticion(int tamano) {
+    public int asignarParticion(int tamano, int idProceso) {
         if (tamano <= 0) return -1;
 
         for (int i = 0; i < bloquesLibres.size(); i++) {
@@ -73,42 +53,33 @@ public class ParticionadorDinamico {
                 int base = bloque.inicio;
 
                 if (bloque.tamano == tamano) {
-                    // El hueco queda exacto: eliminar
                     bloquesLibres.remove(i);
                 } else {
-                    // Reducir el hueco
                     bloque.inicio += tamano;
                     bloque.tamano -= tamano;
                 }
+
+                registrarEnTablaMemoria(idProceso, base, tamano);
                 return base;
             }
         }
-        return -1;   // no hay hueco
+        return -1;
     }
 
     /* ==================== LIBERACION ==================== */
 
-    /**
-     * Libera el bloque del proceso y fusiona con huecos adyacentes.
-     *
-     * @param base   direccion base del bloque a liberar
-     * @param tamano cantidad de posiciones a liberar
-     */
-    public void liberarParticion(int base, int tamano) {
+    public void liberarParticion(int base, int tamano, int idProceso) {
         if (tamano <= 0) return;
 
         bloquesLibres.add(new BloqueLibre(base, tamano));
         fusionarBloques();
+
+        eliminarDeTablaMemoria(idProceso);
     }
 
-    /**
-     * Fusiona bloques libres adyacentes para evitar fragmentacion.
-     */
     private void fusionarBloques() {
-        // Ordenar por direccion
         bloquesLibres.sort((a, b) -> Integer.compare(a.inicio, b.inicio));
 
-        // Fusionar adyacentes
         int i = 0;
         while (i < bloquesLibres.size() - 1) {
             BloqueLibre actual = bloquesLibres.get(i);
@@ -123,70 +94,77 @@ public class ParticionadorDinamico {
         }
     }
 
-    /* ==================== CONSULTAS ==================== */
+    /* ==================== TABLA DE MEMORIA ==================== */
 
     /**
-     * @return total de posiciones libres en la zona usuario.
+     * Registra un bloque en la TablaMemoria.
+     * Cada bloque ocupa 3 posiciones: idProceso, inicio, tamaño.
      */
+    private void registrarEnTablaMemoria(int idProceso, int base, int tamano) {
+        int cantidadBloques = Memoria.TAMANO_TABLA_MEMORIA / POSICIONES_POR_BLOQUE;
+
+        for (int i = 0; i < cantidadBloques; i++) {
+            int posId     = i * POSICIONES_POR_BLOQUE;
+            int posInicio = posId + 1;
+            int posTamano = posId + 2;
+
+            Object v = memoria.leerTablaMemoria(posId);
+            if (v == null) {
+                memoria.escribirTablaMemoria(posId, idProceso);
+                memoria.escribirTablaMemoria(posInicio, base);
+                memoria.escribirTablaMemoria(posTamano, tamano);
+                return;
+            }
+        }
+        System.err.println("[TABLA_MEMORIA] Llena: no se pudo registrar P" + idProceso);
+    }
+
+    /**
+     * Elimina el bloque del proceso en la TablaMemoria.
+     */
+    private void eliminarDeTablaMemoria(int idProceso) {
+        int cantidadBloques = Memoria.TAMANO_TABLA_MEMORIA / POSICIONES_POR_BLOQUE;
+
+        for (int i = 0; i < cantidadBloques; i++) {
+            int posId = i * POSICIONES_POR_BLOQUE;
+            Object v = memoria.leerTablaMemoria(posId);
+            if (v != null && ((Integer) v) == idProceso) {
+                memoria.escribirTablaMemoria(posId, null);
+                memoria.escribirTablaMemoria(posId + 1, null);
+                memoria.escribirTablaMemoria(posId + 2, null);
+                return;
+            }
+        }
+    }
+
+    /* ==================== CONSULTAS ==================== */
+
     public int getEspacioLibre() {
         int total = 0;
-        for (BloqueLibre b : bloquesLibres) {
-            total += b.tamano;
-        }
+        for (BloqueLibre b : bloquesLibres) total += b.tamano;
         return total;
     }
 
-    /**
-     * @return la cantidad de huecos libres.
-     */
-    public int getCantidadHuecos() {
-        return bloquesLibres.size();
-    }
+    public int getCantidadHuecos() { return bloquesLibres.size(); }
 
-    /**
-     * @return el tamaño del hueco libre mas grande.
-     */
     public int getHuecoMasGrande() {
         int max = 0;
-        for (BloqueLibre b : bloquesLibres) {
-            if (b.tamano > max) max = b.tamano;
-        }
+        for (BloqueLibre b : bloquesLibres) if (b.tamano > max) max = b.tamano;
         return max;
     }
 
-    /**
-     * Indica si hay espacio para un proceso de `tamano` posiciones.
-     */
     public boolean hayEspacioPara(int tamano) {
-        for (BloqueLibre b : bloquesLibres) {
-            if (b.tamano >= tamano) return true;
-        }
+        for (BloqueLibre b : bloquesLibres) if (b.tamano >= tamano) return true;
         return false;
     }
 
-    /* ==================== GETTERS ==================== */
+    public int getInicioZonaUsuario() { return inicioZonaUsuario; }
+    public int getFinZonaUsuario() { return finZonaUsuario; }
+    public int getEspacioTotal() { return finZonaUsuario - inicioZonaUsuario; }
 
-    public int getInicioZonaUsuario() {
-        return inicioZonaUsuario;
-    }
-
-    public int getFinZonaUsuario() {
-        return finZonaUsuario;
-    }
-
-    public int getEspacioTotal() {
-        return finZonaUsuario - inicioZonaUsuario;
-    }
-
-    /* ==================== CLASE INTERNA ==================== */
-
-    /**
-     * Representa un hueco libre en la zona usuario.
-     */
     private static class BloqueLibre {
         int inicio;
         int tamano;
-
         BloqueLibre(int inicio, int tamano) {
             this.inicio = inicio;
             this.tamano = tamano;
