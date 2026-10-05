@@ -186,12 +186,6 @@ public class PanelMemoria extends JPanel {
         JPanel leyenda = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         leyenda.setOpaque(false);
 
-        leyenda.add(crearItemLeyenda("ListaProc", COLOR_LISTA_PROC));
-        leyenda.add(crearItemLeyenda("BCP", COLOR_BCP));
-        leyenda.add(crearItemLeyenda("TablaMem", COLOR_TABLA_MEM));
-        leyenda.add(crearItemLeyenda("Usuario", COLOR_USUARIO));
-        leyenda.add(crearItemLeyenda("Libre", COLOR_LIBRE));
-        leyenda.add(crearItemLeyenda("IR", COLOR_IR));
 
         return leyenda;
     }

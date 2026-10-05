@@ -294,7 +294,8 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void cargarArchivo() {
-        FileDialog fileDialog = new FileDialog(this, "Seleccionar archivo ASM", FileDialog.LOAD);
+        FileDialog fileDialog = new FileDialog(this, "Seleccionar archivos ASM", FileDialog.LOAD);
+        fileDialog.setMultipleMode(true);
         fileDialog.setSize(900, 650);
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
         fileDialog.setLocation((screen.width - 900) / 2, (screen.height - 650) / 2);
@@ -302,18 +303,50 @@ public class VentanaPrincipal extends JFrame {
         fileDialog.setDirectory(System.getProperty("user.home"));
         fileDialog.setVisible(true);
 
-        String directorio = fileDialog.getDirectory();
-        String archivoSeleccionado = fileDialog.getFile();
+        File[] archivos = fileDialog.getFiles();
 
-        if (archivoSeleccionado == null || directorio == null) return;
+        if (archivos == null || archivos.length == 0) return;
 
-        File archivo = new File(directorio, archivoSeleccionado);
+        // Contadores para el resumen
+        int cargadosExito = 0;
+        int enEspera = 0;
+        int conError = 0;
 
+        for (File archivo : archivos) {
+            int resultado = cargarUnArchivo(archivo);
+            switch (resultado) {
+                case 1: cargadosExito++; break;
+                case 0: conError++; break;
+                case -1: enEspera++; break;
+            }
+        }
+
+        // Resumen final
+        if (archivos.length > 1) {
+            panelPantalla.agregarMensaje("");
+            panelPantalla.agregarMensaje(">> ===== RESUMEN DE CARGA =====");
+            panelPantalla.agregarMensaje(">> Archivos seleccionados: " + archivos.length);
+            panelPantalla.agregarMensaje(">> Cargados en RAM:        " + cargadosExito);
+            panelPantalla.agregarMensaje(">> En espera (swap):       " + enEspera);
+            panelPantalla.agregarMensaje(">> Con error:              " + conError);
+            panelPantalla.agregarMensaje(">> ============================");
+            panelPantalla.agregarMensaje("");
+        }
+
+        refrescarTodo();
+    }
+
+    /**
+     * Carga un solo archivo .asm.
+     *
+     * @return 1 si exito, 0 si error, -1 si en espera
+     */
+    private int cargarUnArchivo(File archivo) {
         if (!archivo.getName().toLowerCase().endsWith(".asm")) {
             JOptionPane.showMessageDialog(this,
-                    "Por favor selecciona un archivo .asm",
+                    "Se omite \"" + archivo.getName() + "\": no es un archivo .asm",
                     "Formato incorrecto", JOptionPane.WARNING_MESSAGE);
-            return;
+            return 0;
         }
 
         ResultadoCarga resultado = gestor.cargarPrograma(archivo);
@@ -331,19 +364,22 @@ public class VentanaPrincipal extends JFrame {
                     panelPantalla.agregarMensaje(">> [ADVERTENCIA] No se pudo guardar el .asm: "
                             + ex.getMessage());
                 }
-                break;
+                return 1;
+
             case ERROR:
                 JOptionPane.showMessageDialog(this,
-                        "Error al cargar:\n" + resultado.getMensajeError(),
+                        "Error al cargar \"" + archivo.getName() + "\":\n"
+                        + resultado.getMensajeError(),
                         "Archivo invalido", JOptionPane.ERROR_MESSAGE);
-                return;
+                return 0;
+
             case EN_ESPERA:
                 panelPantalla.agregarMensaje(">> " + archivo.getName()
                         + " en espera (no hay hueco suficiente)");
-                break;
+                return -1;
         }
 
-        refrescarTodo();
+        return 0;
     }
 
     private void guardarAsmEnDisco(String nombre, String contenido) {
