@@ -280,7 +280,7 @@ public class PanelDisco extends JPanel {
                 String[] e = entradas.get(i);
                 modeloIndice.addRow(new Object[]{
                     posReal,
-                    e[0] + "  ->  " + e[1] + ".." + e[2],
+                    e[0],
                     e[1],
                     e[2]
                 });

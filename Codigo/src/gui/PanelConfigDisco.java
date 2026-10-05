@@ -5,8 +5,11 @@ import modelo.Disco;
 import javax.swing.JPanel;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
+import javax.swing.BorderFactory;
+import javax.swing.border.TitledBorder;
 import javax.swing.border.EmptyBorder;
 
+import java.awt.Color;
 import java.awt.Font;
 import java.awt.GridBagLayout;
 import java.awt.GridBagConstraints;
@@ -19,9 +22,6 @@ import java.awt.Insets;
  *   1. Tamaño total del disco (indice + swap + archivos).
  *   2. Cantidad maxima de archivos en el indice.
  *   3. Tamaño de la memoria virtual (swap).
- *
- * El disco se divide en 3 zonas:
- *   [Indice] [Memoria Virtual] [Archivos]
  *
  * No crea objetos Disco: eso lo hace quien lo use (VentanaConfiguracion).
  */
@@ -46,60 +46,74 @@ public class PanelConfigDisco extends JPanel {
 
     private void construirInterfaz(int tamanoActual, int maxArchivosActual, int swapActual) {
         setLayout(new GridBagLayout());
-        setBorder(new EmptyBorder(20, 20, 20, 20));
+        setBackground(Paleta.FONDO_PANEL);
+        setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder(
+                        BorderFactory.createLineBorder(Paleta.MORADO_ACENTO, 2),
+                        "Disco (almacenamiento secundario)",
+                        TitledBorder.DEFAULT_JUSTIFICATION,
+                        TitledBorder.DEFAULT_POSITION,
+                        Paleta.FUENTE_TITULO_PANEL,
+                        Paleta.MORADO_ACENTO
+                ),
+                new EmptyBorder(15, 20, 15, 20)
+        ));
 
         GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = new Insets(6, 6, 6, 6);
         gbc.anchor = GridBagConstraints.WEST;
 
-        Font fontLabel = new Font("Segoe UI", Font.PLAIN, 13);
-
-        // Etiqueta informativa
+        // ==== Etiqueta informativa ====
         JLabel lblInfo = new JLabel("Disco minimo: " + TAMANO_DISCO_MINIMO
-                + " | Swap minimo: " + TAMANO_SWAP_MINIMO
-                + " | Max archivos: " + MAX_ARCHIVOS_MAXIMO);
-        lblInfo.setFont(new Font("Segoe UI", Font.ITALIC, 12));
+                + "  |  Swap minimo: " + TAMANO_SWAP_MINIMO
+                + "  |  Max archivos: " + MAX_ARCHIVOS_MAXIMO);
+        lblInfo.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        lblInfo.setForeground(Paleta.TEXTO_NORMAL);
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 2;
         add(lblInfo, gbc);
         gbc.gridwidth = 1;
 
-        // ==== Tamaño total del disco ====
-        JLabel lblTamano = new JLabel("Tamano total del disco:");
-        lblTamano.setFont(fontLabel);
+        // ==== Fila 1: Tamano total del disco ====
+        JLabel lblTamano = crearLabelCampo("Tamano total del disco");
         gbc.gridx = 0;
         gbc.gridy = 1;
+        gbc.weightx = 0;
         add(lblTamano, gbc);
 
-        txtTamanoDisco = new JTextField(String.valueOf(tamanoActual), 10);
+        txtTamanoDisco = crearCampoTexto(String.valueOf(tamanoActual));
         gbc.gridx = 1;
+        gbc.weightx = 1;
         add(txtTamanoDisco, gbc);
 
-        // ==== Máximo de archivos ====
-        JLabel lblMaxArch = new JLabel("Cantidad maxima de archivos:");
-        lblMaxArch.setFont(fontLabel);
+        // ==== Fila 2: Maximo de archivos ====
+        JLabel lblMaxArch = crearLabelCampo("Cantidad maxima de archivos");
         gbc.gridx = 0;
         gbc.gridy = 2;
+        gbc.weightx = 0;
         add(lblMaxArch, gbc);
 
-        txtMaxArchivos = new JTextField(String.valueOf(maxArchivosActual), 10);
+        txtMaxArchivos = crearCampoTexto(String.valueOf(maxArchivosActual));
         gbc.gridx = 1;
+        gbc.weightx = 1;
         add(txtMaxArchivos, gbc);
 
-        // ==== Tamaño del swap ====
-        JLabel lblSwap = new JLabel("Tamano de memoria virtual (swap):");
-        lblSwap.setFont(fontLabel);
+        // ==== Fila 3: Tamano del swap ====
+        JLabel lblSwap = crearLabelCampo("Tamano de memoria virtual (swap)");
         gbc.gridx = 0;
         gbc.gridy = 3;
+        gbc.weightx = 0;
         add(lblSwap, gbc);
 
-        txtTamanoSwap = new JTextField(String.valueOf(swapActual), 10);
+        txtTamanoSwap = crearCampoTexto(String.valueOf(swapActual));
         gbc.gridx = 1;
+        gbc.weightx = 1;
         add(txtTamanoSwap, gbc);
 
-        // Texto de ayuda
-        JLabel lblAyuda = new JLabel("<html><body style='width: 380px'>"
+        // ==== Fila 4: Texto de ayuda ====
+        JLabel lblAyuda = new JLabel("<html><body style='width: 420px'>"
                 + "El disco se divide en 3 zonas:<br>"
                 + "&nbsp;&nbsp;<b>Indice:</b> maxArchivos * 3 posiciones "
                 + "(nombre, inicio, fin).<br>"
@@ -109,17 +123,33 @@ public class PanelConfigDisco extends JPanel {
                 + "Los procesos suspendidos van a la zona de swap."
                 + "</body></html>");
         lblAyuda.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        lblAyuda.setForeground(new Color(0x60, 0x60, 0x60));
         gbc.gridx = 0;
         gbc.gridy = 4;
         gbc.gridwidth = 2;
+        gbc.insets = new Insets(15, 6, 6, 6);
         add(lblAyuda, gbc);
     }
 
-    /**
-     * Valida los campos del panel.
-     *
-     * @return true si todo es valido
-     */
+    private JLabel crearLabelCampo(String texto) {
+        JLabel label = new JLabel(texto + ":");
+        label.setFont(Paleta.FUENTE_LABEL_BOLD);
+        label.setForeground(Paleta.TEXTO_NORMAL);
+        return label;
+    }
+
+    private JTextField crearCampoTexto(String valorInicial) {
+        JTextField campo = new JTextField(valorInicial, 12);
+        campo.setFont(Paleta.FUENTE_MONO);
+        campo.setForeground(Paleta.TEXTO_NORMAL);
+        campo.setBackground(Color.WHITE);
+        campo.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Paleta.MORADO_ACENTO, 1),
+                new EmptyBorder(6, 10, 6, 10)
+        ));
+        return campo;
+    }
+
     public boolean validar() {
         int tamanoIngresado;
         int maxArchivosIngresado;
@@ -134,7 +164,6 @@ public class PanelConfigDisco extends JPanel {
             return false;
         }
 
-        // Validar tamaño del disco
         if (tamanoIngresado < TAMANO_DISCO_MINIMO) {
             mostrarError("El tamaño del disco debe ser al menos " + TAMANO_DISCO_MINIMO + ".");
             return false;
@@ -144,7 +173,6 @@ public class PanelConfigDisco extends JPanel {
             return false;
         }
 
-        // Validar maxArchivos
         if (maxArchivosIngresado < MAX_ARCHIVOS_MINIMO) {
             mostrarError("Debe haber al menos " + MAX_ARCHIVOS_MINIMO + " archivo.");
             return false;
@@ -154,7 +182,6 @@ public class PanelConfigDisco extends JPanel {
             return false;
         }
 
-        // Validar swap
         if (swapIngresado < TAMANO_SWAP_MINIMO) {
             mostrarError("El tamaño de la memoria virtual debe ser al menos "
                     + TAMANO_SWAP_MINIMO + ".");
@@ -166,7 +193,6 @@ public class PanelConfigDisco extends JPanel {
             return false;
         }
 
-        // Validar que las 3 zonas caben en el disco
         int espacioIndice = maxArchivosIngresado * Disco.POSICIONES_POR_ENTRADA_INDICE;
         int espacioOcupado = espacioIndice + swapIngresado;
         int espacioArchivos = tamanoIngresado - espacioOcupado;

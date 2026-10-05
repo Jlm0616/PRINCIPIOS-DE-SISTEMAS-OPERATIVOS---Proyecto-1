@@ -40,7 +40,7 @@ import java.util.List;
 public class VentanaEstadisticas extends JDialog {
 
     private static final DateTimeFormatter FORMATO_HORA =
-            DateTimeFormatter.ofPattern("HH:mm:ss");
+            DateTimeFormatter.ofPattern("HH:mm");
 
     private JTable tabla;
     private DefaultTableModel modelo;

@@ -34,6 +34,8 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 
 import java.io.File;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 public class VentanaPrincipal extends JFrame {
@@ -69,6 +71,10 @@ public class VentanaPrincipal extends JFrame {
     private JButton btnEstadisticas;
 
     private SwingWorker<Integer, Void> workerAutomatico;
+
+    /** Formato de hora para las estadisticas (hora:minuto). */
+    private static final DateTimeFormatter FORMATO_HORA =
+            DateTimeFormatter.ofPattern("HH:mm");
 
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
@@ -132,14 +138,6 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
-    /**
-     * Inicializa el sistema con la configuracion actual.
-     *
-     * La Memoria ya NO lanza excepcion por falta de BCPs: calcula
-     * automaticamente cuantos caben en el 30% y los sobrantes esperan
-     * en la ListaDeTrabajos (disco). Solo lanza excepcion si el kernel
-     * no alcanza ni para 1 BCP, o si los parametros son invalidos.
-     */
     private void inicializarSistema() {
         try {
             memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual, maxProcesosActual);
@@ -158,7 +156,6 @@ public class VentanaPrincipal extends JFrame {
                                         listaProcesos, listaDeTrabajos,
                                         particionador, disco);
         } catch (IllegalArgumentException e) {
-            // Solo si el kernel no alcanza ni para 1 BCP o hay parametros invalidos
             int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1);
 
             JOptionPane.showMessageDialog(this,
@@ -196,7 +193,6 @@ public class VentanaPrincipal extends JFrame {
         centro.add(panelDisco);
         mainPanel.add(centro, BorderLayout.CENTER);
 
-        // Sur: solo pantalla (sin panel de recursos)
         panelPantalla = new PanelPantalla();
         mainPanel.add(panelPantalla, BorderLayout.SOUTH);
 
@@ -351,17 +347,10 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void guardarAsmEnDisco(String nombre, String contenido) {
+        // Si ya existe: no duplicar
         if (disco.existe(nombre)) {
-            int inicio = disco.getInicioArchivo(nombre);
-            if (inicio != -1) {
-                String[] lineas = contenido.split("\\R");
-                int i = 0;
-                for (String linea : lineas) {
-                    if (linea.trim().isEmpty()) continue;
-                    disco.escribir(inicio + i, linea.trim());
-                    i++;
-                }
-            }
+            panelPantalla.agregarMensaje(">> " + nombre
+                    + " ya está en disco (no se duplica)");
             return;
         }
 
@@ -371,9 +360,27 @@ public class VentanaPrincipal extends JFrame {
             if (!linea.trim().isEmpty()) cantidadLineas++;
         }
 
+        // Validacion 1: indice lleno
+        if (disco.getCantidadArchivos() >= disco.getMaxArchivos()) {
+            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
+                    + ": el índice de archivos está lleno ("
+                    + disco.getCantidadArchivos() + "/" + disco.getMaxArchivos() + ")");
+            return;
+        }
+
+        // Validacion 2: sin espacio en zona de archivos
+        if (disco.getEspacioArchivosLibre() < cantidadLineas) {
+            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
+                    + ": sin espacio en la zona de archivos (necesario "
+                    + cantidadLineas + " posiciones, libre "
+                    + disco.getEspacioArchivosLibre() + ")");
+            return;
+        }
+
         int inicio = disco.reservarBloqueArchivo(cantidadLineas);
         if (inicio == -1) {
-            panelPantalla.agregarMensaje(">> [ADVERTENCIA] Sin espacio en disco para " + nombre);
+            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
+                    + ": no hay bloque contiguo de " + cantidadLineas + " posiciones");
             return;
         }
 
@@ -385,7 +392,16 @@ public class VentanaPrincipal extends JFrame {
         }
         int fin = inicio + cantidadLineas - 1;
 
-        disco.registrarArchivo(nombre, inicio, fin);
+        boolean registrado = disco.registrarArchivo(nombre, inicio, fin);
+        if (!registrado) {
+            disco.liberarBloqueArchivo(inicio, cantidadLineas);
+            panelPantalla.agregarMensaje(">> [ERROR] No se pudo registrar " + nombre
+                    + " en el índice. Bloque liberado.");
+            return;
+        }
+
+        panelPantalla.agregarMensaje(">> Guardado en disco: " + nombre
+                + " (" + cantidadLineas + " posiciones en [" + inicio + ".." + fin + "])");
     }
 
     private void ejecutarUnPaso() {
@@ -394,7 +410,14 @@ public class VentanaPrincipal extends JFrame {
                     "No hay procesos para ejecutar.\nCarga un archivo .asm primero.");
             return;
         }
-        if (gestor.ejecutarUnPaso()) refrescarTodo();
+        if (gestor.ejecutarUnPaso()) {
+            refrescarTodo();
+
+            // Si ya no hay procesos activos, imprimir estadisticas automaticamente
+            if (!gestor.hayProcesosActivos()) {
+                imprimirEstadisticasEnPantalla();
+            }
+        }
     }
 
     private void ejecutarAutomatico() {
@@ -425,6 +448,9 @@ public class VentanaPrincipal extends JFrame {
                     int pasos = get();
                     panelPantalla.agregarMensaje(">> Ejecucion automatica completada ("
                             + pasos + " pasos)");
+
+                    // Imprimir estadisticas automaticamente al terminar
+                    imprimirEstadisticasEnPantalla();
                 } catch (java.util.concurrent.CancellationException ex) {
                     panelPantalla.agregarMensaje(">> Ejecucion automatica cancelada.");
                 } catch (Exception ex) {
@@ -531,6 +557,50 @@ public class VentanaPrincipal extends JFrame {
                 + "-" + (disco.getInicioArchivos() - 1));
         panelPantalla.agregarMensaje(">>     Archivos: " + disco.getInicioArchivos()
                 + "-" + (tamanoDiscoActual - 1));
+    }
+
+    /**
+     * Imprime las estadisticas de los procesos terminados directamente en la pantalla.
+     * Se invoca automaticamente al final de la ejecucion (paso a paso o automatico).
+     *
+     * Formato segun el enunciado:
+     *   Proceso | hora:minuto de inicio | hora:minuto final | duracion en segundos
+     */
+    private void imprimirEstadisticasEnPantalla() {
+        List<BCPTerminado> terminados = gestor.getProcesosTerminados();
+        if (terminados.isEmpty()) return;
+
+        panelPantalla.agregarMensaje("");
+        panelPantalla.agregarMensaje(">> ========== ESTADISTICAS ==========");
+        panelPantalla.agregarMensaje(">> Proceso | Inicio | Fin    | Duracion");
+        panelPantalla.agregarMensaje(">> ----------------------------------");
+
+        long duracionTotal = 0;
+        for (BCPTerminado pt : terminados) {
+            long dur = pt.getDuracionSegundos();
+            if (dur > 0) duracionTotal += dur;
+
+            String inicio = formatearHora(pt.getTiempoInicio());
+            String fin    = formatearHora(pt.getTiempoFin());
+
+            panelPantalla.agregarMensaje(String.format(
+                    ">> ID %-4d | %s  | %s | %d s",
+                    pt.getId(), inicio, fin, dur));
+        }
+
+        panelPantalla.agregarMensaje(">> ----------------------------------");
+        panelPantalla.agregarMensaje(">> Total de procesos: " + terminados.size());
+        panelPantalla.agregarMensaje(">> Duracion total:    " + duracionTotal + " s");
+        panelPantalla.agregarMensaje(">> ==================================");
+        panelPantalla.agregarMensaje("");
+    }
+
+    /**
+     * Formatea un LocalDateTime como "HH:mm" (hora:minuto).
+     */
+    private String formatearHora(LocalDateTime t) {
+        if (t == null) return "  -  ";
+        return t.format(FORMATO_HORA);
     }
 
     private void mostrarEstadisticas() {
