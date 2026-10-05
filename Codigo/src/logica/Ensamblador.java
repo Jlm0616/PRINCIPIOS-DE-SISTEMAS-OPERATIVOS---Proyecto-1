@@ -27,16 +27,17 @@ import java.util.Scanner;
  *   LOAD AX
  *   MOV BX, AX
  *   MOV BX, 5
+ *   MOV AH, 3Ch      ; 3C en hexadecimal = 60 en decimal
+ *   MOV AL, 40h
  *   SWAP AX, BX
  *   JMP +3
- *   JMP -2
  *   INT 20H
  *   CMP AX, BX
  *   PARAM 5, 10, 3
  *   PUSH AX
  *
- * Si la validación falla, el mensaje del primer error queda disponible
- * en {@link #getPrimerErrorEncontrado()}.
+ * Los números pueden estar en decimal ("5", "10") o en hexadecimal
+ * ("3Ch", "40H"). El sufijo 'h' o 'H' indica hexadecimal.
  */
 public class Ensamblador {
 
@@ -70,7 +71,7 @@ public class Ensamblador {
 
     /** Registros válidos que pueden usarse como argumento en las instrucciones. */
     private static final Set<String> REGISTROS_VALIDOS = new HashSet<>(
-            Arrays.asList("AC", "AX", "BX", "CX", "DX"));
+            Arrays.asList("AC", "AX", "BX", "CX", "DX", "AH", "AL"));
 
     /** Patrón esperado para códigos de interrupción, ej. "20H", "09H". */
     private static final String PATRON_CODIGO_INTERRUPCION = "^[0-9A-Fa-f]{2}[Hh]$";
@@ -81,13 +82,10 @@ public class Ensamblador {
 
     /**
      * Verifica que el archivo exista, tenga extensión .asm, y que cada
-     * línea de contenido sea sintácticamente válida según las reglas
-     * del conjunto de instrucciones soportado.
-     *
-     * Si una sola línea falla, el archivo completo se considera inválido.
+     * línea de contenido sea sintácticamente válida.
      *
      * @param archivo archivo a validar
-     * @return true si el archivo es válido; false en caso contrario
+     * @return true si el archivo es válido
      */
     public boolean esArchivoValido(File archivo) {
         erroresEncontrados = new ArrayList<>();
@@ -135,10 +133,7 @@ public class Ensamblador {
     }
 
     /**
-     * Devuelve todos los errores encontrados en un solo texto,
-     * uno por línea, listos para mostrar en un diálogo.
-     *
-     * @return texto con todos los errores, o cadena vacía si no hubo
+     * Devuelve todos los errores encontrados en un solo texto.
      */
     public String getErroresComoTexto() {
         if (erroresEncontrados == null || erroresEncontrados.isEmpty()) {
@@ -147,21 +142,14 @@ public class Ensamblador {
         return String.join("\n\n", erroresEncontrados);
     }
 
-    /** @return la lista completa de errores. */
     public List<String> getErroresEncontrados() {
         return erroresEncontrados;
     }
-    
+
     /* ==================== LECTURA DE ARCHIVO ==================== */
 
     /**
      * Lee un archivo .asm y devuelve sus instrucciones como objetos.
-     *
-     * Se asume que el archivo ya fue validado con {@link #esArchivoValido(File)}.
-     * Si una línea no es válida, se lanza {@link IllegalArgumentException}.
-     *
-     * @param archivoEnsamblador archivo .asm previamente validado
-     * @return lista de instrucciones en orden de aparición
      */
     public List<Instruccion> leerArchivo(File archivoEnsamblador) {
         List<Instruccion> instrucciones = new ArrayList<>();
@@ -183,20 +171,10 @@ public class Ensamblador {
         return instrucciones;
     }
 
-    /* ==================== PARSEO CENTRAL (usado por ambos métodos) ==================== */
+    /* ==================== PARSEO CENTRAL ==================== */
 
     /**
      * Analiza una línea de código y construye la instrucción correspondiente.
-     *
-     * Separa el opcode de los argumentos, valida la cantidad de argumentos
-     * según el opcode, valida el tipo de cada argumento (registro, número,
-     * desplazamiento con signo, o código de interrupción), y arma el objeto
-     * {@link Instruccion} resultante.
-     *
-     * @param linea línea de código ya recortada (trim), no vacía
-     * @return la instrucción construida
-     * @throws IllegalArgumentException si la línea no es válida, con un
-     *         mensaje describiendo el motivo exacto
      */
     private Instruccion parsearLinea(String linea) {
         int primerEspacio = linea.indexOf(' ');
@@ -232,10 +210,6 @@ public class Ensamblador {
 
     /**
      * Valida el tipo de cada argumento según las reglas del opcode dado.
-     *
-     * @param opcode     opcode ya validado en cantidad de argumentos
-     * @param argumentos lista de argumentos en texto, ya separados y recortados
-     * @throws IllegalArgumentException si algún argumento no cumple su tipo esperado
      */
     private void validarArgumentos(String opcode, List<String> argumentos) {
 
@@ -245,7 +219,7 @@ public class Ensamblador {
             return;
         }
 
-        // Interrupciones: un solo argumento, debe tener formato de codigo (ej. "20H")
+        // Interrupciones: un solo argumento, formato de codigo (ej. "20H")
         if (opcode.equals("INT")) {
             String codigo = argumentos.get(0);
             if (!codigo.matches(PATRON_CODIGO_INTERRUPCION)) {
@@ -273,8 +247,7 @@ public class Ensamblador {
             return;
         }
 
-        // Resto de opcodes con argumentos de registro (LOAD, STORE, ADD, SUB,
-        // INC, DEC, SWAP, CMP, PUSH, POP): cada argumento presente debe ser registro
+        // Resto de opcodes con argumentos de registro
         if (PRIMER_ARG_REGISTRO.contains(opcode)) {
             for (String arg : argumentos) {
                 validarRegistro(arg);
@@ -284,9 +257,6 @@ public class Ensamblador {
 
     /**
      * Valida que un texto sea un nombre de registro conocido.
-     *
-     * @param arg texto a validar
-     * @throws IllegalArgumentException si no es un registro válido
      */
     private void validarRegistro(String arg) {
         if (!REGISTROS_VALIDOS.contains(arg.toUpperCase())) {
@@ -296,18 +266,43 @@ public class Ensamblador {
     }
 
     /**
-     * Valida que un texto sea un número entero válido (con o sin signo).
-     *
-     * @param arg       texto a validar
-     * @param descripcion nombre descriptivo del argumento, para el mensaje de error
-     * @throws IllegalArgumentException si no es un entero válido
+     * Valida que un texto sea un número entero válido.
+     * Acepta decimal ("5") o hexadecimal ("3Ch").
      */
     private void validarEntero(String arg, String descripcion) {
         try {
-            Integer.parseInt(arg);
+            parsearNumero(arg);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "el " + descripcion + " '" + arg + "' no es un numero entero valido");
+        }
+    }
+
+    /* ==================== HELPERS DE NUMEROS ==================== */
+
+    /**
+     * Parsea un numero que puede estar en decimal o hexadecimal.
+     *
+     * Formato:
+     *   - Hexadecimal: termina en 'h' o 'H' (ej. "3Ch", "40H", "0A0h").
+     *   - Decimal: sin sufijo (ej. "5", "10", "-3").
+     *
+     * @param arg numero en texto
+     * @return el valor entero
+     * @throws NumberFormatException si no es un numero valido
+     */
+    public static int parsearNumero(String arg) {
+        if (arg == null || arg.isEmpty()) {
+            throw new NumberFormatException("numero vacio");
+        }
+        String s = arg.trim();
+        if (s.toLowerCase().endsWith("h")) {
+            // Hexadecimal
+            String sinH = s.substring(0, s.length() - 1);
+            return Integer.parseInt(sinH, 16);
+        } else {
+            // Decimal
+            return Integer.parseInt(s);
         }
     }
 }

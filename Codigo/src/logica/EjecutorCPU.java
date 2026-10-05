@@ -353,6 +353,18 @@ public class EjecutorCPU {
         return (v >= 32768) ? v - 65536 : v;
     }
 
+    /**
+     * Lee el valor de un registro por nombre.
+     *
+     * AH y AL NO son campos propios de la CPU: son las dos mitades
+     * del registro AX.
+     *   - AH = byte alto de AX: (AX >> 8) & 0xFF
+     *   - AL = byte bajo de AX:  AX & 0xFF
+     *
+     * @param nombre nombre del registro (AC, AX, BX, CX, DX, AH, AL)
+     * @return el valor del registro
+     * @throws IllegalArgumentException si el registro no existe
+     */
     private int leerRegistro(String nombre) {
         switch (nombre) {
             case "AC": return cpu.getAC();
@@ -360,11 +372,23 @@ public class EjecutorCPU {
             case "BX": return cpu.getBX();
             case "CX": return cpu.getCX();
             case "DX": return cpu.getDX();
+            case "AH": return (cpu.getAX() >> 8) & 0xFF;
+            case "AL": return cpu.getAX() & 0xFF;
             default:
                 throw new IllegalArgumentException("Registro desconocido: " + nombre);
         }
     }
 
+    /**
+     * Escribe un valor en un registro por nombre.
+     *
+     * AH y AL NO son campos propios de la CPU: son las dos mitades
+     * del registro AX. Al escribir en AH o AL se preserva la otra mitad.
+     *
+     * @param nombre nombre del registro (AC, AX, BX, CX, DX, AH, AL)
+     * @param valor  valor a escribir
+     * @throws IllegalArgumentException si el registro no existe
+     */
     private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
         switch (nombre) {
@@ -373,6 +397,16 @@ public class EjecutorCPU {
             case "BX": cpu.setBX(valorLimitado); break;
             case "CX": cpu.setCX(valorLimitado); break;
             case "DX": cpu.setDX(valorLimitado); break;
+            case "AH": {
+                int al = cpu.getAX() & 0xFF;
+                cpu.setAX(((valorLimitado & 0xFF) << 8) | al);
+                break;
+            }
+            case "AL": {
+                int ah = (cpu.getAX() >> 8) & 0xFF;
+                cpu.setAX((ah << 8) | (valorLimitado & 0xFF));
+                break;
+            }
             default:
                 throw new IllegalArgumentException("Registro desconocido: " + nombre);
         }
