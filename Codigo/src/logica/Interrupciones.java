@@ -18,7 +18,8 @@ import java.util.function.Consumer;
  *     4Dh -> leer
  *     40h -> escribir
  *     41h -> eliminar
- *   DX = numero usado para construir el nombre "archivo_<DX>".
+ *   DX = cadena de texto con el nombre del archivo (String).
+ *        Ejemplo: MOV DX, "datos.txt"
  *   AL = resultado (0 exito, 1 error, o contenido leido).
  *
  * Al abrir un archivo, su nombre se agrega a las 5 posiciones de
@@ -62,8 +63,12 @@ public class Interrupciones {
         return ResultadoInterrupcion.TERMINADO;
     }
 
+    /**
+     * INT 10H: imprime en pantalla el valor de DX.
+     * DX puede ser un numero o un string.
+     */
     private ResultadoInterrupcion ejecutarImprimirPantalla(BCP bcp) {
-        String mensaje = "[PANTALLA] DX = " + bcp.getDx();
+        String mensaje = "[PANTALLA] DX = " + bcp.getDx();   // ← DX es String
         if (salidaPantalla != null) {
             salidaPantalla.accept(mensaje);
         }
@@ -79,6 +84,9 @@ public class Interrupciones {
 
     /**
      * INT 21H: manejo de archivos.
+     *
+     * DX contiene el nombre del archivo como String.
+     * Si el nombre no tiene extension, se agrega ".txt" por defecto.
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
@@ -86,30 +94,36 @@ public class Interrupciones {
         }
 
         int ah = bcp.getAh();
-        int dx = bcp.getDx();
-        String nombre = "archivo_" + dx;
+        String nombre = bcp.getDx();   // ← CAMBIO: DX es String directo
+
+        // Validacion: nombre vacio
+        if (nombre == null || nombre.isEmpty()) {
+            bcp.setAl(1);
+            System.out.println("[DISCO] ERROR: nombre de archivo vacio (DX=\"" + nombre + "\")");
+            return ResultadoInterrupcion.BLOQUEADO;
+        }
 
         switch (ah) {
             case 0x3C: {  // crear archivo
                 boolean creado = crearArchivoEnDisco(nombre);
                 bcp.setAl(creado ? 0 : 1);
-                System.out.println("[DISCO] crear(" + nombre + ") = " + creado);
+                System.out.println("[DISCO] crear(\"" + nombre + "\") = " + creado);
                 break;
             }
 
             case 0x3D: {  // abrir archivo
                 if (!disco.existe(nombre)) {
                     bcp.setAl(1);   // archivo no existe
-                    System.out.println("[DISCO] abrir(" + nombre + ") = NO EXISTE");
+                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = NO EXISTE");
                     break;
                 }
                 boolean abierto = bcp.abrirArchivo(nombre);
                 if (abierto) {
                     bcp.setAl(0);
-                    System.out.println("[DISCO] abrir(" + nombre + ") = OK");
+                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = OK");
                 } else {
                     bcp.setAl(1);   // demasiados archivos abiertos
-                    System.out.println("[DISCO] abrir(" + nombre + ") = ERROR (max "
+                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = ERROR (max "
                             + BCP.TAMANO_MAXIMO_ARCHIVOS + " archivos abiertos)");
                 }
                 break;
@@ -122,7 +136,7 @@ public class Interrupciones {
                 } else {
                     bcp.setAl(0);
                 }
-                System.out.println("[DISCO] leer(" + nombre + ") = " + contenido);
+                System.out.println("[DISCO] leer(\"" + nombre + "\") = \"" + contenido + "\"");
                 break;
             }
 
@@ -131,7 +145,7 @@ public class Interrupciones {
                 String aEscribir = String.valueOf((char) al);
                 boolean escrito = escribirArchivoEnDisco(nombre, aEscribir);
                 bcp.setAl(escrito ? 0 : 1);
-                System.out.println("[DISCO] escribir(" + nombre + ", " + aEscribir + ")");
+                System.out.println("[DISCO] escribir(\"" + nombre + "\", \"" + aEscribir + "\")");
                 break;
             }
 
@@ -141,7 +155,7 @@ public class Interrupciones {
 
                 boolean eliminado = eliminarArchivoDeDisco(nombre);
                 bcp.setAl(eliminado ? 0 : 1);
-                System.out.println("[DISCO] eliminar(" + nombre + ") = " + eliminado);
+                System.out.println("[DISCO] eliminar(\"" + nombre + "\") = " + eliminado);
                 break;
             }
 

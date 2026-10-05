@@ -7,10 +7,11 @@ import java.util.Collections;
 /**
  * Representa una instrucción ensamblador de la máquina virtual.
  *
- * ... (javadoc igual)
- *
  * Los argumentos numéricos pueden estar en decimal ("5", "-3") o en
  * hexadecimal ("3Ch", "40H"). El sufijo 'h' o 'H' indica hexadecimal.
+ *
+ * Los argumentos de tipo string van entre comillas dobles, ej:
+ *   MOV DX, "datos.txt"
  */
 public class Instruccion {
 
@@ -95,6 +96,41 @@ public class Instruccion {
         return arg.equals("AC") || arg.equals("AX") || arg.equals("BX")
                 || arg.equals("CX") || arg.equals("DX")
                 || arg.equals("AH") || arg.equals("AL");
+    }
+
+    /**
+     * Indica si el argumento en la posicion dada es un string literal
+     * (esta entre comillas dobles).
+     *
+     * Ejemplo: MOV DX, "datos.txt" → esStringLiteral(1) devuelve true.
+     *
+     * @param indice posicion del argumento a revisar
+     * @return true si el argumento es un string entre comillas
+     */
+    public boolean esStringLiteral(int indice) {
+        if (indice < 0 || indice >= argumentos.size()) {
+            return false;
+        }
+        String arg = argumentos.get(indice).trim();
+        return arg.length() >= 2
+                && arg.startsWith("\"")
+                && arg.endsWith("\"");
+    }
+
+    /**
+     * Devuelve el contenido del string literal sin las comillas.
+     *
+     * Ejemplo: MOV DX, "datos.txt" → getStringLiteral(1) devuelve "datos.txt".
+     *
+     * @param indice posicion del argumento
+     * @return el string sin comillas, o el argumento crudo si no es literal
+     */
+    public String getStringLiteral(int indice) {
+        String arg = argumentos.get(indice).trim();
+        if (arg.length() >= 2 && arg.startsWith("\"") && arg.endsWith("\"")) {
+            return arg.substring(1, arg.length() - 1);
+        }
+        return arg;
     }
 
     public int getCodigoInterrupcion(int indice) {

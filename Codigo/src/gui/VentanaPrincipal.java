@@ -208,20 +208,20 @@ public class VentanaPrincipal extends JFrame {
                     + " esperando input de teclado (0-255)...");
         });
 
-        gestor.setSolicitudArchivo(bcp -> {
-            int ah = bcp.getAh();
-            String operacion;
-            switch (ah) {
-                case 0x3C: operacion = "crear"; break;
-                case 0x3D: operacion = "abrir"; break;
-                case 0x4D: operacion = "leer"; break;
-                case 0x40: operacion = "escribir"; break;
-                case 0x41: operacion = "eliminar"; break;
-                default:   operacion = "desconocida"; break;
-            }
-            panelPantalla.agregarMensaje(">> [DISCO] Proceso " + bcp.getId()
-                    + " -> " + operacion + " archivo_" + bcp.getDx());
-        });
+            gestor.setSolicitudArchivo(bcp -> {
+                int ah = bcp.getAh();
+                String operacion;
+                switch (ah) {
+                    case 0x3C: operacion = "crear"; break;
+                    case 0x3D: operacion = "abrir"; break;
+                    case 0x4D: operacion = "leer"; break;
+                    case 0x40: operacion = "escribir"; break;
+                    case 0x41: operacion = "eliminar"; break;
+                    default:   operacion = "desconocida"; break;
+                }
+                panelPantalla.agregarMensaje(">> [DISCO] Proceso " + bcp.getId()
+                        + " -> " + operacion + " \"" + bcp.getDx() + "\"");
+            });
 
         panelPantalla.setOnEnviar(valor -> {
             boolean desbloqueado = gestor.desbloquearProceso(valor);

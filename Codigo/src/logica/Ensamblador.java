@@ -29,6 +29,7 @@ import java.util.Scanner;
  *   MOV BX, 5
  *   MOV AH, 3Ch      ; 3C en hexadecimal = 60 en decimal
  *   MOV AL, 40h
+ *   MOV DX, "datos.txt"   ; string literal para INT 21H
  *   SWAP AX, BX
  *   JMP +3
  *   INT 20H
@@ -38,6 +39,9 @@ import java.util.Scanner;
  *
  * Los números pueden estar en decimal ("5", "10") o en hexadecimal
  * ("3Ch", "40H"). El sufijo 'h' o 'H' indica hexadecimal.
+ *
+ * Los strings van entre comillas dobles y solo son válidos como segundo
+ * argumento de MOV (ej. MOV DX, "datos.txt").
  */
 public class Ensamblador {
 
@@ -80,13 +84,6 @@ public class Ensamblador {
 
     /* ==================== VALIDACIÓN DE ARCHIVO ==================== */
 
-    /**
-     * Verifica que el archivo exista, tenga extensión .asm, y que cada
-     * línea de contenido sea sintácticamente válida.
-     *
-     * @param archivo archivo a validar
-     * @return true si el archivo es válido
-     */
     public boolean esArchivoValido(File archivo) {
         erroresEncontrados = new ArrayList<>();
 
@@ -132,9 +129,6 @@ public class Ensamblador {
         return erroresEncontrados.isEmpty();
     }
 
-    /**
-     * Devuelve todos los errores encontrados en un solo texto.
-     */
     public String getErroresComoTexto() {
         if (erroresEncontrados == null || erroresEncontrados.isEmpty()) {
             return "";
@@ -148,9 +142,6 @@ public class Ensamblador {
 
     /* ==================== LECTURA DE ARCHIVO ==================== */
 
-    /**
-     * Lee un archivo .asm y devuelve sus instrucciones como objetos.
-     */
     public List<Instruccion> leerArchivo(File archivoEnsamblador) {
         List<Instruccion> instrucciones = new ArrayList<>();
 
@@ -175,6 +166,9 @@ public class Ensamblador {
 
     /**
      * Analiza una línea de código y construye la instrucción correspondiente.
+     *
+     * El parseo de argumentos respeta strings entre comillas: las comas
+     * dentro de un string NO se consideran separadores.
      */
     private Instruccion parsearLinea(String linea) {
         int primerEspacio = linea.indexOf(' ');
@@ -183,12 +177,7 @@ public class Ensamblador {
 
         String resto = (primerEspacio == -1) ? "" : linea.substring(primerEspacio + 1).trim();
 
-        List<String> argumentos = new ArrayList<>();
-        if (!resto.isEmpty()) {
-            for (String parte : resto.split(",")) {
-                argumentos.add(parte.trim());
-            }
-        }
+        List<String> argumentos = parsearArgumentos(resto);
 
         if (!RANGO_ARGUMENTOS.containsKey(opcode)) {
             throw new IllegalArgumentException("opcode desconocido '" + opcode + "'");
@@ -206,6 +195,48 @@ public class Ensamblador {
         validarArgumentos(opcode, argumentos);
 
         return new Instruccion(opcode, argumentos);
+    }
+
+    /**
+     * Parsea la lista de argumentos separando por comas, pero respetando
+     * strings entre comillas dobles.
+     *
+     * Ejemplos:
+     *   "BX, AX"            → ["BX", "AX"]
+     *   "DX, \"datos.txt\"" → ["DX", "\"datos.txt\""]
+     *   "DX, \"a,b.txt\""   → ["DX", "\"a,b.txt\""]   (la coma NO separa)
+     *
+     * @param resto texto de argumentos sin el opcode
+     * @return lista de argumentos
+     */
+    private List<String> parsearArgumentos(String resto) {
+        List<String> argumentos = new ArrayList<>();
+        if (resto == null || resto.isEmpty()) {
+            return argumentos;
+        }
+
+        StringBuilder actual = new StringBuilder();
+        boolean dentroComillas = false;
+
+        for (int i = 0; i < resto.length(); i++) {
+            char c = resto.charAt(i);
+
+            if (c == '"') {
+                dentroComillas = !dentroComillas;
+                actual.append(c);
+            } else if (c == ',' && !dentroComillas) {
+                argumentos.add(actual.toString().trim());
+                actual.setLength(0);
+            } else {
+                actual.append(c);
+            }
+        }
+
+        if (actual.length() > 0) {
+            argumentos.add(actual.toString().trim());
+        }
+
+        return argumentos;
     }
 
     /**
@@ -237,13 +268,23 @@ public class Ensamblador {
             return;
         }
 
-        // MOV: primer argumento siempre registro; segundo puede ser registro o valor
+        // MOV: primer argumento siempre registro; segundo puede ser:
+        //   - registro
+        //   - numero
+        //   - string literal (entre comillas)
         if (opcode.equals("MOV")) {
             validarRegistro(argumentos.get(0));
             String segundo = argumentos.get(1);
-            if (!REGISTROS_VALIDOS.contains(segundo.toUpperCase())) {
-                validarEntero(segundo, "valor");
+
+            if (REGISTROS_VALIDOS.contains(segundo.toUpperCase())) {
+                return;   // es un registro
             }
+
+            if (esStringLiteral(segundo)) {
+                return;   // es un string literal
+            }
+
+            validarEntero(segundo, "valor");
             return;
         }
 
@@ -253,6 +294,15 @@ public class Ensamblador {
                 validarRegistro(arg);
             }
         }
+    }
+
+    /**
+     * Verifica si un argumento es un string literal (entre comillas dobles).
+     */
+    private boolean esStringLiteral(String arg) {
+        if (arg == null) return false;
+        String s = arg.trim();
+        return s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"");
     }
 
     /**

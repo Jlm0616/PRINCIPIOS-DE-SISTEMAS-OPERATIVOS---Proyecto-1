@@ -23,7 +23,7 @@ import java.util.Stack;
  *   6  = AX
  *   7  = BX
  *   8  = CX
- *   9  = DX
+ *   9  = DX               ← String (nombre de archivo o numero)
  *   10 = Overflow
  *   11 = BanderaIgual
  *   12 = PesoPendiente
@@ -44,6 +44,11 @@ import java.util.Stack;
  *   27 = ArchivoAbierto[4] ← FIN ARCHIVOS
  *   28 = Siguiente BCP
  *   29 = Direccion
+ *
+ * IMPORTANTE: DX es un String (no un int) porque el enunciado indica
+ * que en INT 21H, DX guarda la cadena de texto del nombre del archivo.
+ * Para compatibilidad con instrucciones aritmeticas (ADD, SUB, CMP),
+ * se proveen los metodos getDxAsInt() y setDxAsInt().
  *
  * Hay dos formas de crear un BCP:
  *   1. new BCP(memoria, direccionBase, id, prioridad) → INICIALIZA los campos.
@@ -103,7 +108,7 @@ public class BCP {
         setAx(0);
         setBx(0);
         setCx(0);
-        setDx(0);
+        setDx("0");   // ← String
         setOverflow(false);
         setBanderaIgual(false);
         setPesoPendiente(0);
@@ -178,7 +183,7 @@ public class BCP {
         valores[OFF_AX]             = 0;
         valores[OFF_BX]             = 0;
         valores[OFF_CX]             = 0;
-        valores[OFF_DX]             = 0;
+        valores[OFF_DX]             = "0";   // ← String
         valores[OFF_OVERFLOW]       = false;
         valores[OFF_BANDERA_IGUAL]  = false;
         valores[OFF_PESO_PENDIENTE] = 0;
@@ -211,7 +216,7 @@ public class BCP {
         setAx(cpu.getAX());
         setBx(cpu.getBX());
         setCx(cpu.getCX());
-        setDx(cpu.getDX());
+        setDx(cpu.getDX());   // ← String
         setOverflow(cpu.getOverflow());
         setBanderaIgual(cpu.getBanderaIgual());
     }
@@ -223,7 +228,7 @@ public class BCP {
         cpu.setAX(getAx());
         cpu.setBX(getBx());
         cpu.setCX(getCx());
-        cpu.setDX(getDx());
+        cpu.setDX(getDx());   // ← String
         cpu.setOverflow(getOverflow());
         cpu.setBanderaIgual(getBanderaIgual());
     }
@@ -409,7 +414,28 @@ public class BCP {
     public int getAx() { return (Integer) leer(OFF_AX); }
     public int getBx() { return (Integer) leer(OFF_BX); }
     public int getCx() { return (Integer) leer(OFF_CX); }
-    public int getDx() { return (Integer) leer(OFF_DX); }
+
+    /**
+     * Devuelve DX como String.
+     * Puede contener un nombre de archivo o un numero en texto.
+     */
+    public String getDx() {
+        Object v = leer(OFF_DX);
+        return (v != null) ? v.toString() : "0";
+    }
+
+    /**
+     * Devuelve DX como entero, parseando el string.
+     * Si DX no es numerico, devuelve 0.
+     * Se usa para compatibilidad con instrucciones aritmeticas.
+     */
+    public int getDxAsInt() {
+        try {
+            return Integer.parseInt(getDx());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
 
     public boolean getOverflow() {
         Boolean v = (Boolean) leer(OFF_OVERFLOW);
@@ -443,7 +469,23 @@ public class BCP {
     public void setAx(int ax) { escribir(OFF_AX, ax); }
     public void setBx(int bx) { escribir(OFF_BX, bx); }
     public void setCx(int cx) { escribir(OFF_CX, cx); }
-    public void setDx(int dx) { escribir(OFF_DX, dx); }
+
+    /**
+     * Asigna DX como String.
+     * @param dx valor a asignar (si es null, se asigna "0")
+     */
+    public void setDx(String dx) {
+        escribir(OFF_DX, (dx != null) ? dx : "0");
+    }
+
+    /**
+     * Asigna DX como entero, convirtiendolo a String.
+     * Se usa para compatibilidad con instrucciones aritmeticas.
+     */
+    public void setDxAsInt(int dx) {
+        escribir(OFF_DX, String.valueOf(dx));
+    }
+
     public void setOverflow(boolean overflow) { escribir(OFF_OVERFLOW, overflow); }
     public void setBanderaIgual(boolean banderaIgual) { escribir(OFF_BANDERA_IGUAL, banderaIgual); }
     public void setPesoPendiente(int pesoPendiente) { escribir(OFF_PESO_PENDIENTE, pesoPendiente); }

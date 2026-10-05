@@ -27,6 +27,9 @@ import java.util.List;
  * FCFS puro no apropiativo estricto:
  *   - Si un proceso se bloquea por INT 09H, la CPU queda idle.
  *   - Si un proceso se bloquea por INT 21H, se simula una tardanza.
+ *
+ * NOTA: DX es un String (nombre de archivo para INT 21H).
+ * Para operaciones con valores numericos (como INT 09H), se usa setDxAsInt().
  */
 public class GestorProcesos {
 
@@ -66,7 +69,7 @@ public class GestorProcesos {
         this.listaDeTrabajos = listaDeTrabajos;
         this.particionador = particionador;
         this.planificador = new Planificador(listaProcesos);
-        this.despachador = new Despachador(cpu, memoria);   // ← CAMBIO
+        this.despachador = new Despachador(cpu, memoria);
         this.siguienteId = 1;
         this.procesosTerminados = new ArrayList<>();
         this.procesosBloqueadosInput = new ArrayList<>();
@@ -197,7 +200,6 @@ public class GestorProcesos {
             System.out.println("[FCFS] Cambio de proceso -> ahora ejecuta ID "
                     + siguiente.getId());
 
-            // Sacar la dirección del primero y despachar
             int dir = listaProcesos.sacarPrimeraDireccion();
             despachador.despachar(dir);
         }
@@ -382,11 +384,17 @@ public class GestorProcesos {
         listaProcesos.agregar(bcp);
     }
 
+    /**
+     * Desbloquea el primer proceso esperando input de teclado.
+     *
+     * El valor viene como int (0-255) desde la GUI, y se guarda en DX
+     * como String (convertido con setDxAsInt).
+     */
     public boolean desbloquearProceso(int valor) {
         if (procesosBloqueadosInput.isEmpty()) return false;
 
         BCP bcp = procesosBloqueadosInput.remove(0);
-        bcp.setDx(valor);
+        bcp.setDxAsInt(valor);   // ← CAMBIO: int → String
         bcp.setEstado(EstadoProceso.READY);
         listaProcesos.agregarAlPrincipio(bcp);
 

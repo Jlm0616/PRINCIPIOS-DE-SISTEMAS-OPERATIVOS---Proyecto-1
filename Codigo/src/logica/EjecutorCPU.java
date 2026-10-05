@@ -28,6 +28,10 @@ import modelo.Disco;
  *
  * Las interrupciones (INT) se delegan a la clase Interrupciones, que
  * encapsula la logica de las llamadas al sistema.
+ *
+ * IMPORTANTE: DX es un String. Esto permite guardar nombres de archivo
+ * (ej. "datos.txt") para INT 21H. Para operaciones aritmeticas con DX,
+ * se usa getDXAsInt() / setDXAsInt() que parsean/convierten el string.
  */
 public class EjecutorCPU {
 
@@ -43,13 +47,6 @@ public class EjecutorCPU {
      *  el proceso colgado (salvaguarda). */
     public static final int MAX_CICLOS_AUTOMATICO = 10000;
 
-    /**
-     * Crea un ejecutor asociado a una CPU, una memoria y un BCP.
-     *
-     * @param cpu     CPU sobre la que se ejecutarán las instrucciones
-     * @param memoria memoria desde la que se leerán las instrucciones
-     * @param bcp     BCP del proceso en ejecución
-     */
     public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp, Disco disco) {
         this.cpu = cpu;
         this.memoria = memoria;
@@ -60,26 +57,11 @@ public class EjecutorCPU {
 
     /* ==================== CICLO PRINCIPAL (por segundo) ==================== */
 
-    /**
-     * Ejecuta UN SEGUNDO de CPU del proceso actual.
-     *
-     * Si no había instrucción en curso, la carga y calcula su peso.
-     * Consume 1 unidad de peso. Si el peso llega a 0, ejecuta la
-     * instrucción completa (efectos + avance de PC + sincronización).
-     *
-     * El peso pendiente vive en el BCP para que sobreviva a un cambio
-     * de contexto (round-robin).
-     *
-     * @return true si la instrucción se completó en este segundo
-     * @throws IllegalStateException si el programa ya terminó o no hay
-     *         instrucción en la posición del PC
-     */
     public boolean ejecutarSegundoDeCPU() {
         if (programaTerminado) {
             return false;
         }
 
-        // 1. Si no hay instrucción en curso, cargarla y calcular su peso
         if (bcp.getPesoPendiente() == 0) {
             int pc = cpu.getPC();
             Instruccion instr = memoria.leerInstruccion(pc);
@@ -98,15 +80,12 @@ public class EjecutorCPU {
             cpu.setIR(pc);
         }
 
-        // 2. Consumir 1 segundo
         bcp.setPesoPendiente(bcp.getPesoPendiente() - 1);
 
-        // 3. ¿Se completó la instrucción?
         if (bcp.getPesoPendiente() > 0) {
             return false;
         }
 
-        // 4. Instrucción completada: ejecutar efectos
         int pc = cpu.getPC();
         Instruccion instr = memoria.leerInstruccion(pc);
 
@@ -123,23 +102,15 @@ public class EjecutorCPU {
             return true;
         }
 
-        // 5. Avanzar el PC salvo que la instrucción haya sido un salto
         if (!saltoEjecutado) {
             cpu.setPC(pc + 1);
         }
 
-        // 6. Sincronizar CPU -> BCP
         bcp.actualizarDesdeCPU(cpu);
 
         return true;
     }
 
-    /**
-     * Ejecuta el programa completo hasta que termine (INT 20H, EXIT, o error fatal).
-     * Pensado para el modo "Automático" de la GUI.
-     *
-     * @return cantidad de segundos de CPU consumidos
-     */
     public int ejecutarHastaTerminar() {
         int segundos = 0;
         while (!programaTerminado && segundos < MAX_CICLOS_AUTOMATICO) {
@@ -160,13 +131,6 @@ public class EjecutorCPU {
 
     /* ==================== EJECUCIÓN POR OPCODE ==================== */
 
-    /**
-     * Ejecuta la operación correspondiente al opcode de la instrucción.
-     *
-     * @param instr instrucción a ejecutar
-     * @param pc    PC actual (dirección de la instrucción en ejecución)
-     * @return true si la instrucción modificó el PC (salto tomado), false si no
-     */
     private boolean ejecutarOperacion(Instruccion instr, int pc) {
         String opcode = instr.getOpcode();
 
@@ -261,14 +225,31 @@ public class EjecutorCPU {
 
     /* ==================== HELPERS POR INSTRUCCIÓN ==================== */
 
+    /**
+     * Ejecuta MOV destino, fuente.
+     *
+     * Casos:
+     *   1. MOV DX, "texto"     → asigna string literal a DX
+     *   2. MOV reg, reg        → copia valor entre registros
+     *   3. MOV reg, numero     → asigna numero a registro
+     */
     private void ejecutarMOV(Instruccion instr) {
         String destino = instr.getArgumento(0);
 
+        // Caso 1: MOV DX, "texto" (string literal)
+        if (instr.cantidadArgumentos() >= 2 && instr.esStringLiteral(1)) {
+            escribirRegistroString(destino, instr.getStringLiteral(1));
+            return;
+        }
+
+        // Caso 2: MOV reg, reg
         if (instr.cantidadArgumentos() >= 2 && instr.esRegistro(1)) {
             escribirRegistro(destino, leerRegistro(instr.getArgumento(1)));
-        } else {
-            escribirRegistro(destino, instr.getArgumentoComoEntero(1));
+            return;
         }
+
+        // Caso 3: MOV reg, numero
+        escribirRegistro(destino, instr.getArgumentoComoEntero(1));
     }
 
     private void ejecutarINC(Instruccion instr) {
@@ -304,23 +285,12 @@ public class EjecutorCPU {
         cpu.setBanderaIgual(v1 == v2);
     }
 
-    /**
-     * Ejecuta una interrupción delegando a la clase Interrupciones.
-     *
-     * Según el resultado:
-     *   - RUNNING:    el proceso sigue vivo (INT 10H).
-     *   - BLOQUEADO:  el proceso se bloqueó esperando E/S (INT 09H, INT 21H).
-     *   - TERMINADO:  el proceso terminó (INT 20H).
-     *
-     * @param codigo código decimal de la interrupción (ej. 0x20 = 32)
-     */
     private void ejecutarINT(int codigo) {
         Interrupciones.ResultadoInterrupcion resultado =
                 interrupciones.ejecutar(codigo, bcp);
 
         switch (resultado) {
             case RUNNING:
-                // el proceso sigue vivo, no hacer nada
                 break;
             case BLOQUEADO:
                 bcp.setEstado(EstadoProceso.BLOCKED);
@@ -356,14 +326,10 @@ public class EjecutorCPU {
     /**
      * Lee el valor de un registro por nombre.
      *
-     * AH y AL NO son campos propios de la CPU: son las dos mitades
-     * del registro AX.
-     *   - AH = byte alto de AX: (AX >> 8) & 0xFF
-     *   - AL = byte bajo de AX:  AX & 0xFF
+     * DX se parsea como entero (getDXAsInt).
+     * Si DX contiene un texto no numerico, devuelve 0.
      *
-     * @param nombre nombre del registro (AC, AX, BX, CX, DX, AH, AL)
-     * @return el valor del registro
-     * @throws IllegalArgumentException si el registro no existe
+     * AH y AL son mitades de AX.
      */
     private int leerRegistro(String nombre) {
         switch (nombre) {
@@ -371,7 +337,7 @@ public class EjecutorCPU {
             case "AX": return cpu.getAX();
             case "BX": return cpu.getBX();
             case "CX": return cpu.getCX();
-            case "DX": return cpu.getDX();
+            case "DX": return cpu.getDXAsInt();   // ← CAMBIO: parsea String
             case "AH": return (cpu.getAX() >> 8) & 0xFF;
             case "AL": return cpu.getAX() & 0xFF;
             default:
@@ -380,14 +346,9 @@ public class EjecutorCPU {
     }
 
     /**
-     * Escribe un valor en un registro por nombre.
+     * Escribe un valor entero en un registro por nombre.
      *
-     * AH y AL NO son campos propios de la CPU: son las dos mitades
-     * del registro AX. Al escribir en AH o AL se preserva la otra mitad.
-     *
-     * @param nombre nombre del registro (AC, AX, BX, CX, DX, AH, AL)
-     * @param valor  valor a escribir
-     * @throws IllegalArgumentException si el registro no existe
+     * DX se escribe como String (setDXAsInt).
      */
     private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
@@ -396,7 +357,7 @@ public class EjecutorCPU {
             case "AX": cpu.setAX(valorLimitado); break;
             case "BX": cpu.setBX(valorLimitado); break;
             case "CX": cpu.setCX(valorLimitado); break;
-            case "DX": cpu.setDX(valorLimitado); break;
+            case "DX": cpu.setDXAsInt(valorLimitado); break;   // ← CAMBIO
             case "AH": {
                 int al = cpu.getAX() & 0xFF;
                 cpu.setAX(((valorLimitado & 0xFF) << 8) | al);
@@ -409,6 +370,25 @@ public class EjecutorCPU {
             }
             default:
                 throw new IllegalArgumentException("Registro desconocido: " + nombre);
+        }
+    }
+
+    /**
+     * Escribe un String en un registro.
+     *
+     * Solo DX acepta strings. Otros registros intentan parsear el string
+     * como entero.
+     */
+    private void escribirRegistroString(String nombre, String valor) {
+        if ("DX".equals(nombre)) {
+            cpu.setDX(valor);
+        } else {
+            try {
+                escribirRegistro(nombre, Integer.parseInt(valor));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                    "El registro " + nombre + " solo acepta valores numericos, no: " + valor);
+            }
         }
     }
 
