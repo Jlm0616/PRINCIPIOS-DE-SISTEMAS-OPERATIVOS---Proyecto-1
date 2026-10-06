@@ -26,9 +26,13 @@ import java.util.List;
  * Panel que muestra el contenido del disco.
  *
  * El disco tiene 3 zonas (según el profe):
- *   1. Índice de archivos (nombre, inicio, fin)
+ *   1. Índice de archivos (nombre, inicio, fin, zona)
  *   2. Memoria virtual (swap)
  *   3. Archivos
+ *
+ * La columna "Zona" del índice indica dónde está el contenido:
+ *   - PRINCIPAL → en la zona de archivos (94-511).
+ *   - VIRTUAL   → en la zona de swap (30-93).
  *
  * Arriba: barra de uso TOTAL del disco.
  * Centro: pestañas con cada zona.
@@ -119,14 +123,14 @@ public class PanelDisco extends JPanel {
         panel.setOpaque(false);
 
         modeloIndice = new DefaultTableModel(
-                new Object[]{"Pos", "Nombre", "Inicio", "Fin"}, 0) {
+                new Object[]{"Pos", "Nombre", "Inicio", "Fin", "Zona"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
 
-        tablaIndice = crearTabla(modeloIndice);
+        tablaIndice = crearTablaConRendererZona(modeloIndice);
         panel.add(new JScrollPane(tablaIndice), BorderLayout.CENTER);
 
         return panel;
@@ -204,8 +208,11 @@ public class PanelDisco extends JPanel {
         return panel;
     }
 
-    /* ==================== TABLA GENÉRICA ==================== */
+    /* ==================== TABLAS ==================== */
 
+    /**
+     * Crea una tabla con renderer por defecto (alterna filas).
+     */
     private JTable crearTabla(DefaultTableModel modelo) {
         JTable tabla = new JTable(modelo);
         tabla.setFont(Paleta.FUENTE_MONO);
@@ -222,6 +229,64 @@ public class PanelDisco extends JPanel {
                 Component c = super.getTableCellRendererComponent(
                         table, value, isSelected, hasFocus, row, column);
                 if (isSelected) return c;
+                c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+                c.setForeground(Paleta.TEXTO_NORMAL);
+                setFont(Paleta.FUENTE_MONO);
+                return c;
+            }
+        });
+
+        return tabla;
+    }
+
+    /**
+     * Crea la tabla del índice con un renderer especial para la columna "Zona":
+     *   - PRINCIPAL → verde claro
+     *   - VIRTUAL   → naranja claro
+     */
+    private JTable crearTablaConRendererZona(DefaultTableModel modelo) {
+        JTable tabla = new JTable(modelo);
+        tabla.setFont(Paleta.FUENTE_MONO);
+        tabla.setRowHeight(22);
+        tabla.setGridColor(new Color(0xE0, 0xE0, 0xE0));
+        tabla.setShowGrid(true);
+        tabla.setFillsViewportHeight(true);
+        tabla.getTableHeader().setFont(Paleta.FUENTE_LABEL_BOLD);
+
+        // Anchos de columna
+        tabla.getColumnModel().getColumn(0).setPreferredWidth(50);
+        tabla.getColumnModel().getColumn(1).setPreferredWidth(150);
+        tabla.getColumnModel().getColumn(2).setPreferredWidth(60);
+        tabla.getColumnModel().getColumn(3).setPreferredWidth(60);
+        tabla.getColumnModel().getColumn(4).setPreferredWidth(100);
+
+        tabla.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                Component c = super.getTableCellRendererComponent(
+                        table, value, isSelected, hasFocus, row, column);
+
+                if (isSelected) return c;
+
+                // Columna "Zona" (índice 4)
+                if (column == 4) {
+                    String zona = (value != null) ? value.toString() : "";
+                    if ("PRINCIPAL".equals(zona)) {
+                        c.setBackground(new Color(0xE8, 0xF5, 0xE9));  // verde claro
+                        c.setForeground(new Color(0x1B, 0x5E, 0x20));
+                        setFont(Paleta.FUENTE_MONO_BOLD);
+                    } else if ("VIRTUAL".equals(zona)) {
+                        c.setBackground(new Color(0xFF, 0xF3, 0xE0));  // naranja claro
+                        c.setForeground(new Color(0xBF, 0x60, 0x00));
+                        setFont(Paleta.FUENTE_MONO_BOLD);
+                    } else {
+                        c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+                        c.setForeground(Paleta.TEXTO_NORMAL);
+                    }
+                    return c;
+                }
+
                 c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
                 c.setForeground(Paleta.TEXTO_NORMAL);
                 setFont(Paleta.FUENTE_MONO);
@@ -273,19 +338,22 @@ public class PanelDisco extends JPanel {
         List<String[]> entradas = discoActual.getIndice();
         int maxArchivos = discoActual.getMaxArchivos();
         int posicionIndice = discoActual.getInicioIndice();
+        int posicionesPorEntrada = Disco.POSICIONES_POR_ENTRADA_INDICE;
 
         for (int i = 0; i < maxArchivos; i++) {
-            int posReal = posicionIndice + (i * 3);
+            int posReal = posicionIndice + (i * posicionesPorEntrada);
             if (i < entradas.size()) {
                 String[] e = entradas.get(i);
+                // e = [nombre, inicio, fin, zona]
                 modeloIndice.addRow(new Object[]{
                     posReal,
                     e[0],
                     e[1],
-                    e[2]
+                    e[2],
+                    e.length > 3 ? e[3] : "-"
                 });
             } else {
-                modeloIndice.addRow(new Object[]{posReal, "(vacio)", "-", "-"});
+                modeloIndice.addRow(new Object[]{posReal, "(vacio)", "-", "-", "-"});
             }
         }
     }

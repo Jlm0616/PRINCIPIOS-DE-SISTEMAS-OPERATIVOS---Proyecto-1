@@ -208,20 +208,20 @@ public class VentanaPrincipal extends JFrame {
                     + " esperando input de teclado (0-255)...");
         });
 
-            gestor.setSolicitudArchivo(bcp -> {
-                int ah = bcp.getAh();
-                String operacion;
-                switch (ah) {
-                    case 0x3C: operacion = "crear"; break;
-                    case 0x3D: operacion = "abrir"; break;
-                    case 0x4D: operacion = "leer"; break;
-                    case 0x40: operacion = "escribir"; break;
-                    case 0x41: operacion = "eliminar"; break;
-                    default:   operacion = "desconocida"; break;
-                }
-                panelPantalla.agregarMensaje(">> [DISCO] Proceso " + bcp.getId()
-                        + " -> " + operacion + " \"" + bcp.getDx() + "\"");
-            });
+        gestor.setSolicitudArchivo(bcp -> {
+            int ah = bcp.getAh();
+            String operacion;
+            switch (ah) {
+                case 0x3C: operacion = "crear"; break;
+                case 0x3D: operacion = "abrir"; break;
+                case 0x4D: operacion = "leer"; break;
+                case 0x40: operacion = "escribir"; break;
+                case 0x41: operacion = "eliminar"; break;
+                default:   operacion = "desconocida"; break;
+            }
+            panelPantalla.agregarMensaje(">> [DISCO] Proceso " + bcp.getId()
+                    + " -> " + operacion + " \"" + bcp.getDx() + "\"");
+        });
 
         panelPantalla.setOnEnviar(valor -> {
             boolean desbloqueado = gestor.desbloquearProceso(valor);
@@ -307,7 +307,6 @@ public class VentanaPrincipal extends JFrame {
 
         if (archivos == null || archivos.length == 0) return;
 
-        // Contadores para el resumen
         int cargadosExito = 0;
         int enEspera = 0;
         int conError = 0;
@@ -321,7 +320,6 @@ public class VentanaPrincipal extends JFrame {
             }
         }
 
-        // Resumen final
         if (archivos.length > 1) {
             panelPantalla.agregarMensaje("");
             panelPantalla.agregarMensaje(">> ===== RESUMEN DE CARGA =====");
@@ -336,11 +334,6 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
-    /**
-     * Carga un solo archivo .asm.
-     *
-     * @return 1 si exito, 0 si error, -1 si en espera
-     */
     private int cargarUnArchivo(File archivo) {
         if (!archivo.getName().toLowerCase().endsWith(".asm")) {
             JOptionPane.showMessageDialog(this,
@@ -449,7 +442,6 @@ public class VentanaPrincipal extends JFrame {
         if (gestor.ejecutarUnPaso()) {
             refrescarTodo();
 
-            // Si ya no hay procesos activos, imprimir estadisticas automaticamente
             if (!gestor.hayProcesosActivos()) {
                 imprimirEstadisticasEnPantalla();
             }
@@ -485,7 +477,6 @@ public class VentanaPrincipal extends JFrame {
                     panelPantalla.agregarMensaje(">> Ejecucion automatica completada ("
                             + pasos + " pasos)");
 
-                    // Imprimir estadisticas automaticamente al terminar
                     imprimirEstadisticasEnPantalla();
                 } catch (java.util.concurrent.CancellationException ex) {
                     panelPantalla.agregarMensaje(">> Ejecucion automatica cancelada.");
@@ -595,13 +586,6 @@ public class VentanaPrincipal extends JFrame {
                 + "-" + (tamanoDiscoActual - 1));
     }
 
-    /**
-     * Imprime las estadisticas de los procesos terminados directamente en la pantalla.
-     * Se invoca automaticamente al final de la ejecucion (paso a paso o automatico).
-     *
-     * Formato segun el enunciado:
-     *   Proceso | hora:minuto de inicio | hora:minuto final | duracion en segundos
-     */
     private void imprimirEstadisticasEnPantalla() {
         List<BCPTerminado> terminados = gestor.getProcesosTerminados();
         if (terminados.isEmpty()) return;
@@ -631,9 +615,6 @@ public class VentanaPrincipal extends JFrame {
         panelPantalla.agregarMensaje("");
     }
 
-    /**
-     * Formatea un LocalDateTime como "HH:mm" (hora:minuto).
-     */
     private String formatearHora(LocalDateTime t) {
         if (t == null) return "  -  ";
         return t.format(FORMATO_HORA);

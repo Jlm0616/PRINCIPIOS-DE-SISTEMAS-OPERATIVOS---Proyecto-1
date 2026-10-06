@@ -18,6 +18,7 @@ import modelo.EstadoProceso;
  *   - estado:        NEW, READY_SUSPEND o BLOCKED_SUSPEND.
  *   - direccionBaseEnSwap: posición donde empiezan las instrucciones en swap.
  *   - tamanoEnSwap:  cantidad de posiciones ocupadas (N instrucciones).
+ *   - nombreArchivo: nombre del archivo .asm original (para el índice del disco).
  *
  * Nota: según el profe, el BCP NUNCA se mueve de memoria principal.
  * Por eso el swap solo guarda las INSTRUCCIONES del proceso.
@@ -35,6 +36,9 @@ public class ProcesoEnEspera {
 
     /** Cantidad de posiciones que ocupa en el swap (N instrucciones). */
     private final int tamanoEnSwap;
+
+    /** Nombre del archivo .asm original (para el índice del disco). */
+    private String nombreArchivo;
 
     /**
      * Crea los metadatos de un proceso suspendido.
@@ -60,6 +64,7 @@ public class ProcesoEnEspera {
         this.estado = estado;
         this.tamanoEnSwap = tamanoEnSwap;
         this.direccionBaseEnSwap = -1;
+        this.nombreArchivo = null;
     }
 
     /* ==================== GETTERS ==================== */
@@ -80,6 +85,13 @@ public class ProcesoEnEspera {
         return tamanoEnSwap;
     }
 
+    /**
+     * @return el nombre del archivo .asm original, o null si no se asignó.
+     */
+    public String getNombreArchivo() {
+        return nombreArchivo;
+    }
+
     /* ==================== SETTERS ==================== */
 
     /**
@@ -92,6 +104,16 @@ public class ProcesoEnEspera {
         this.direccionBaseEnSwap = direccionBase;
     }
 
+    /**
+     * Establece el nombre del archivo .asm original.
+     * Invocado por GestorProcesos al suspender el proceso.
+     *
+     * @param nombreArchivo nombre del archivo .asm
+     */
+    public void setNombreArchivo(String nombreArchivo) {
+        this.nombreArchivo = nombreArchivo;
+    }
+
     /* ==================== toString ==================== */
 
     @Override
@@ -99,6 +121,7 @@ public class ProcesoEnEspera {
         return "ProcesoEnEspera{id=" + id
                 + ", estado=" + estado
                 + ", dirSwap=" + direccionBaseEnSwap
-                + ", tamano=" + tamanoEnSwap + "}";
+                + ", tamano=" + tamanoEnSwap
+                + ", archivo=" + nombreArchivo + "}";
     }
 }

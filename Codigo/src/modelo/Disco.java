@@ -11,9 +11,11 @@ import java.util.List;
  *   ┌─────────────────────────────────────────────────────┐
  *   │  ZONA 1: Índice de archivos                         │
  *   │  ├── maxArchivos configurable (default 10)          │
- *   │  ├── 3 posiciones por archivo:                      │
- *   │  │     [nombre] [inicio] [fin]                      │
- *   │  └── Total = maxArchivos * 3                        │
+ *   │  ├── 4 posiciones por archivo:                      │
+ *   │  │     [nombre] [inicio] [fin] [zona]               │
+ *   │  │     zona = "PRINCIPAL" (archivos) o "VIRTUAL"    │
+ *   │  │              (swap)                              │
+ *   │  └── Total = maxArchivos * 4                        │
  *   ├─────────────────────────────────────────────────────┤
  *   │  ZONA 2: Memoria virtual (swap)                     │
  *   │  ├── tamaño configurable (default 64)               │
@@ -27,7 +29,9 @@ import java.util.List;
  *   - Memoria principal = procesos activos (READY, RUNNING, BLOCKED).
  *   - Disco             = índice + swap + archivos.
  *
- * La memoria virtual NO es una clase aparte: es una zona del disco.
+ * La zona "zona" del índice indica dónde está el contenido del archivo:
+ *   - "PRINCIPAL" → en la zona de archivos (94-511).
+ *   - "VIRTUAL"   → en la zona de swap (30-93).
  */
 public class Disco {
 
@@ -40,8 +44,14 @@ public class Disco {
     /** Cantidad mínima de archivos en el índice. */
     public static final int MAX_ARCHIVOS_MINIMO = 1;
 
-    /** Posiciones por entrada del índice (nombre, inicio, fin). */
-    public static final int POSICIONES_POR_ENTRADA_INDICE = 3;
+    /** Posiciones por entrada del índice (nombre, inicio, fin, zona). */
+    public static final int POSICIONES_POR_ENTRADA_INDICE = 4;
+
+    /** Zona del índice: archivo en zona de archivos. */
+    public static final String ZONA_PRINCIPAL = "PRINCIPAL";
+
+    /** Zona del índice: archivo en zona de swap. */
+    public static final String ZONA_VIRTUAL = "VIRTUAL";
 
     /** Tamaño mínimo de la memoria virtual (swap). */
     public static final int TAMANO_SWAP_MINIMO = 16;
@@ -61,8 +71,8 @@ public class Disco {
     /* ==================== ZONAS (calculadas) ==================== */
 
     private final int inicioIndice;      // 0
-    private final int inicioSwap;        // maxArchivos * 3
-    private final int inicioArchivos;    // maxArchivos * 3 + tamanoSwap
+    private final int inicioSwap;        // maxArchivos * 4
+    private final int inicioArchivos;    // maxArchivos * 4 + tamanoSwap
 
     /* ==================== CONTENIDO ==================== */
 
@@ -137,14 +147,27 @@ public class Disco {
     /* ==================== ZONA 1: ÍNDICE ==================== */
 
     /**
-     * Registra un archivo en el índice.
+     * Registra un archivo en el índice (zona PRINCIPAL por defecto).
      *
      * @param nombre nombre del archivo
-     * @param inicio posición donde empieza el contenido en la zona de archivos
+     * @param inicio posición donde empieza el contenido
      * @param fin    posición donde termina (inclusive)
      * @return true si se registró, false si el índice está lleno
      */
     public boolean registrarArchivo(String nombre, int inicio, int fin) {
+        return registrarArchivo(nombre, inicio, fin, ZONA_PRINCIPAL);
+    }
+
+    /**
+     * Registra un archivo en el índice con la zona indicada.
+     *
+     * @param nombre nombre del archivo
+     * @param inicio posición donde empieza el contenido
+     * @param fin    posición donde termina (inclusive)
+     * @param zona   ZONA_PRINCIPAL (archivos) o ZONA_VIRTUAL (swap)
+     * @return true si se registró, false si el índice está lleno
+     */
+    public boolean registrarArchivo(String nombre, int inicio, int fin, String zona) {
         if (nombre == null || nombre.isEmpty()) return false;
         if (getCantidadArchivos() >= maxArchivos) return false;
 
@@ -154,6 +177,7 @@ public class Disco {
         posiciones[entrada]     = nombre;
         posiciones[entrada + 1] = inicio;
         posiciones[entrada + 2] = fin;
+        posiciones[entrada + 3] = zona;
         return true;
     }
 
@@ -170,6 +194,26 @@ public class Disco {
         posiciones[entrada]     = null;
         posiciones[entrada + 1] = null;
         posiciones[entrada + 2] = null;
+        posiciones[entrada + 3] = null;
+        return true;
+    }
+
+    /**
+     * Actualiza la zona de un archivo existente en el índice.
+     *
+     * @param nombre nombre del archivo
+     * @param nuevaZona ZONA_PRINCIPAL o ZONA_VIRTUAL
+     * @param nuevoInicio nueva posición de inicio
+     * @param nuevoFin nueva posición de fin
+     * @return true si se actualizó
+     */
+    public boolean actualizarZona(String nombre, String nuevaZona, int nuevoInicio, int nuevoFin) {
+        int entrada = buscarEntradaPorNombre(nombre);
+        if (entrada == -1) return false;
+
+        posiciones[entrada + 1] = nuevoInicio;
+        posiciones[entrada + 2] = nuevoFin;
+        posiciones[entrada + 3] = nuevaZona;
         return true;
     }
 
@@ -201,6 +245,15 @@ public class Disco {
     }
 
     /**
+     * @return la zona del archivo (ZONA_PRINCIPAL o ZONA_VIRTUAL), o null si no existe.
+     */
+    public String getZonaArchivo(String nombre) {
+        int entrada = buscarEntradaPorNombre(nombre);
+        if (entrada == -1) return null;
+        return (String) posiciones[entrada + 3];
+    }
+
+    /**
      * @return la cantidad de archivos actualmente registrados.
      */
     public int getCantidadArchivos() {
@@ -215,7 +268,7 @@ public class Disco {
     }
 
     /**
-     * @return lista de todas las entradas del índice (nombre, inicio, fin).
+     * @return lista de todas las entradas del índice (nombre, inicio, fin, zona).
      */
     public List<String[]> getIndice() {
         List<String[]> lista = new ArrayList<>();
@@ -225,10 +278,12 @@ public class Disco {
             if (nombre != null) {
                 Object inicio = posiciones[entrada + 1];
                 Object fin = posiciones[entrada + 2];
+                Object zona = posiciones[entrada + 3];
                 lista.add(new String[]{
                     nombre.toString(),
                     inicio != null ? inicio.toString() : "-",
-                    fin != null ? fin.toString() : "-"
+                    fin != null ? fin.toString() : "-",
+                    zona != null ? zona.toString() : "-"
                 });
             }
         }

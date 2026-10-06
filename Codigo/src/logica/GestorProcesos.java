@@ -30,6 +30,12 @@ import java.util.List;
  *
  * NOTA: DX es un String (nombre de archivo para INT 21H).
  * Para operaciones con valores numericos (como INT 09H), se usa setDxAsInt().
+ *
+ * INDICE DEL DISCO: tiene 4 posiciones por archivo [nombre, inicio, fin, zona].
+ * La zona puede ser:
+ *   - ZONA_PRINCIPAL → el .asm está en la zona de archivos (94-511).
+ *   - ZONA_VIRTUAL   → el .asm está en la zona de swap (30-93).
+ * Cuando un proceso pasa de swap a RAM, se copia a archivos y se actualiza el índice.
  */
 public class GestorProcesos {
 
@@ -89,6 +95,7 @@ public class GestorProcesos {
         List<Instruccion> instrucciones = ensamblador.leerArchivo(archivo);
         int tamanoNecesario = instrucciones.size();
         int id = siguienteId;
+        String nombreArchivo = archivo.getName();
 
         int base = particionador.asignarParticion(tamanoNecesario, id);
         if (base != -1) {
@@ -100,7 +107,7 @@ public class GestorProcesos {
             particionador.liberarParticion(base, tamanoNecesario, id);
         }
 
-        ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones, id);
+        ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones, id, nombreArchivo);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
             siguienteId++;
             return resultadoSwap;
@@ -112,7 +119,13 @@ public class GestorProcesos {
             + "Libera espacio o aumenta el disco en 'Configurar'.");
     }
 
-    private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones, int id) {
+    /**
+     * Suspende un proceso en swap y lo registra en el índice del disco
+     * con la zona VIRTUAL.
+     */
+    private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones,
+                                           int id,
+                                           String nombreArchivo) {
         int tamanoInstrucciones = instrucciones.size();
 
         if (disco.getEspacioSwapLibre() < tamanoInstrucciones) {
@@ -130,13 +143,24 @@ public class GestorProcesos {
         Object[] instruccionesArr = instrucciones.toArray();
         disco.escribirBloqueSwap(dirSwap, instruccionesArr);
 
+        // Registrar en el índice del disco con zona VIRTUAL
+        int finSwap = dirSwap + tamanoInstrucciones - 1;
+        boolean registrado = disco.registrarArchivo(
+                nombreArchivo, dirSwap, finSwap, Disco.ZONA_VIRTUAL);
+        if (!registrado) {
+            disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
+            return ResultadoCarga.error(
+                "No se pudo registrar el archivo en el índice del disco (lleno).");
+        }
+
         ProcesoEnEspera pe = new ProcesoEnEspera(
                 id, EstadoProceso.NEW, tamanoInstrucciones);
         pe.setDireccionBaseEnSwap(dirSwap);
+        pe.setNombreArchivo(nombreArchivo);
         listaDeTrabajos.agregar(pe);
 
         System.out.println("[SWAP] Proceso " + id
-                + " en NEW (lista de trabajos, dir swap=" + dirSwap
+                + " (" + nombreArchivo + ") en NEW (lista de trabajos, dir swap=" + dirSwap
                 + ", instrucciones=" + tamanoInstrucciones + ")");
 
         return ResultadoCarga.enEspera();
@@ -333,12 +357,25 @@ public class GestorProcesos {
         reactivarSiguienteProceso();
     }
 
+    /**
+     * Reactiva el siguiente proceso de la ListaDeTrabajos.
+     *
+     * Pasos:
+     *   1. Buscar el proceso en swap.
+     *   2. Asignar partición + BCP.
+     *   3. Copiar las instrucciones de swap a RAM.
+     *   4. Copiar las instrucciones a la zona de archivos del disco.
+     *   5. Actualizar el índice: VIRTUAL → PRINCIPAL, con las nuevas posiciones.
+     *   6. Liberar el bloque de swap.
+     *   7. Agregar el proceso a ListaProcesos.
+     */
     private void reactivarSiguienteProceso() {
         if (listaDeTrabajos.estaVacia()) return;
 
         ProcesoEnEspera pe = listaDeTrabajos.verPrimero();
         int tamanoInstrucciones = pe.getTamanoEnSwap();
         int id = pe.getId();
+        String nombreArchivo = pe.getNombreArchivo();
 
         int base = particionador.asignarParticion(tamanoInstrucciones, id);
         if (base == -1) return;
@@ -352,9 +389,6 @@ public class GestorProcesos {
         int dirSwap = pe.getDireccionBaseEnSwap();
         Object[] instruccionesArr = disco.leerBloqueSwap(dirSwap, tamanoInstrucciones);
 
-        disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
-        listaDeTrabajos.sacarPrimero();
-
         List<Instruccion> instrucciones = new ArrayList<>();
         for (Object obj : instruccionesArr) {
             if (obj instanceof Instruccion) {
@@ -362,11 +396,32 @@ public class GestorProcesos {
             }
         }
 
+        // === COPIAR A ARCHIVOS (si hay espacio) ===
+        int nuevoInicioArchivos = disco.reservarBloqueArchivo(tamanoInstrucciones);
+        if (nuevoInicioArchivos != -1) {
+            disco.escribirBloqueArchivo(nuevoInicioArchivos, instruccionesArr);
+            int nuevoFinArchivos = nuevoInicioArchivos + tamanoInstrucciones - 1;
+
+            // Actualizar el índice del disco
+            if (nombreArchivo != null) {
+                disco.actualizarZona(nombreArchivo, Disco.ZONA_PRINCIPAL,
+                        nuevoInicioArchivos, nuevoFinArchivos);
+            }
+        } else {
+            System.out.println("[WARNING] No hay espacio en archivos para copiar "
+                    + nombreArchivo + ". Se mantiene solo en swap.");
+        }
+
+        // === LIBERAR SWAP Y LISTA DE TRABAJOS ===
+        disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
+        listaDeTrabajos.sacarPrimero();
+
+        // === CREAR BCP Y ADMITIR ===
         BCP bcpRestaurado = new BCP(memoria, direccionBase, id, 1);
         admitirEnParticion(bcpRestaurado, instrucciones, base);
 
-        System.out.println("[SWAP] Proceso " + id
-                + " reactivado desde ListaDeTrabajos (kernel=" + direccionBase
+        System.out.println("[SWAP] Proceso " + id + " (" + nombreArchivo
+                + ") reactivado desde ListaDeTrabajos (kernel=" + direccionBase
                 + ", usuario=" + base + ")");
     }
 
@@ -394,7 +449,7 @@ public class GestorProcesos {
         if (procesosBloqueadosInput.isEmpty()) return false;
 
         BCP bcp = procesosBloqueadosInput.remove(0);
-        bcp.setDxAsInt(valor);   // ← CAMBIO: int → String
+        bcp.setDxAsInt(valor);
         bcp.setEstado(EstadoProceso.READY);
         listaProcesos.agregarAlPrincipio(bcp);
 
