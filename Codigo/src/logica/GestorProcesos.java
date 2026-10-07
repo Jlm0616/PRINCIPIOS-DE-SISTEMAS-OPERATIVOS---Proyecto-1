@@ -9,9 +9,7 @@ import modelo.Disco;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Fachada de orquestación del ciclo de vida y ejecución de procesos.
@@ -26,13 +24,13 @@ import java.util.Map;
  *   - TablaMemoria: bcpsQueCaben × 3 posiciones.
  *
  * INDICE DEL DISCO: tiene 2 secciones:
- *   - Indice ASM: archivos .asm cargados.
+ *   - Indice ASM: catalogo de .asm en SWAP (zona VIRTUAL).
  *   - Indice PROCESO: archivos creados por procesos (datos.txt).
  * Cada entrada ocupa 4 posiciones: [nombre, inicio, fin, zona].
  *
  * IMPORTANTE: cuando un .asm entra a RAM, sus instrucciones se copian
- * TAMBIEN a la zona de archivos del disco (para que el indice ASM
- * apunte a la zona de archivos, no a RAM).
+ * a la zona de archivos del disco (como respaldo), pero NO se registra
+ * en el indice ASM: el indice solo cataloga lo que está en swap.
  */
 public class GestorProcesos {
 
@@ -57,9 +55,6 @@ public class GestorProcesos {
     private int siguienteId;
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueadosInput;
-
-    /** Nombre del archivo .asm asociado a cada id de proceso. */
-    private Map<Integer, String> nombreArchivoPorProceso = new HashMap<>();
 
     private java.util.function.Consumer<String> salidaPantalla;
 
@@ -104,9 +99,8 @@ public class GestorProcesos {
         if (base != -1) {
             BCP bcp = crearProcesoEnParticion(instrucciones, base, id);
             if (bcp != null) {
-                // Copiar el .asm a la zona de archivos del disco y registrar en indice ASM
-                copiarAsmAArchivosYRegistrar(nombreArchivo, instrucciones);
-                nombreArchivoPorProceso.put(id, nombreArchivo);
+                // Copiar el .asm a la zona de archivos (NO registrar en indice)
+                copiarAsmAArchivos(nombreArchivo, instrucciones);
                 siguienteId++;
                 return ResultadoCarga.exito(bcp);
             }
@@ -116,7 +110,6 @@ public class GestorProcesos {
         // 2. Si no cabe, va a swap
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones, id, nombreArchivo);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
-            nombreArchivoPorProceso.put(id, nombreArchivo);
             siguienteId++;
             return resultadoSwap;
         }
@@ -128,23 +121,13 @@ public class GestorProcesos {
     }
 
     /**
-     * Copia las instrucciones de un .asm a la zona de archivos del disco
-     * y lo registra en el indice ASM con zona PRINCIPAL.
-     *
-     * Si el .asm ya existe en el indice, solo actualiza su zona (no lo duplica).
+     * Copia las instrucciones de un .asm a la zona de archivos del disco.
+     * NO lo registra en el índice ASM: cuando está en RAM, no necesita
+     * entrada en el índice (el índice solo cataloga lo que está en swap).
      */
-    private void copiarAsmAArchivosYRegistrar(String nombreArchivo,
-                                              List<Instruccion> instrucciones) {
+    private void copiarAsmAArchivos(String nombreArchivo,
+                                    List<Instruccion> instrucciones) {
         int tamano = instrucciones.size();
-
-        // Si ya existe en el indice ASM: solo actualizar zona a PRINCIPAL
-        if (disco.existe(nombreArchivo, Disco.TIPO_ASM)) {
-            int inicio = disco.getInicioArchivo(nombreArchivo, Disco.TIPO_ASM);
-            int fin = disco.getFinArchivo(nombreArchivo, Disco.TIPO_ASM);
-            disco.actualizarZona(nombreArchivo, Disco.TIPO_ASM,
-                    Disco.ZONA_PRINCIPAL, inicio, fin);
-            return;
-        }
 
         // Reservar espacio en la zona de archivos
         int inicio = disco.reservarBloqueArchivo(tamano);
@@ -157,20 +140,9 @@ public class GestorProcesos {
         // Copiar instrucciones a la zona de archivos
         Object[] instruccionesArr = instrucciones.toArray();
         disco.escribirBloqueArchivo(inicio, instruccionesArr);
-        int fin = inicio + tamano - 1;
-
-        // Registrar en el indice ASM con zona PRINCIPAL
-        boolean ok = disco.registrarArchivoAsm(nombreArchivo, inicio, fin,
-                Disco.ZONA_PRINCIPAL);
-        if (!ok) {
-            disco.liberarBloqueArchivo(inicio, tamano);
-            System.out.println("[WARNING] No se pudo registrar " + nombreArchivo
-                    + " en el indice ASM (lleno).");
-            return;
-        }
 
         System.out.println("[DISCO] .asm guardado en zona archivos: " + nombreArchivo
-                + " (" + inicio + "-" + fin + ")");
+                + " (" + inicio + "-" + (inicio + tamano - 1) + ")");
     }
 
     /**
@@ -446,13 +418,6 @@ public class GestorProcesos {
 
         memoria.liberarBloqueBCP(bcp.getDireccionBase());
 
-        // === NUEVO: eliminar la entrada del indice ASM (sin liberar la zona de archivos) ===
-        String nombreArchivo = nombreArchivoPorProceso.remove(idProceso);
-        if (nombreArchivo != null && disco.existe(nombreArchivo, Disco.TIPO_ASM)) {
-            disco.eliminarDelIndice(nombreArchivo, Disco.TIPO_ASM);
-            System.out.println("[DISCO] .asm eliminado del indice: " + nombreArchivo);
-        }
-
         reactivarSiguienteProceso();
     }
 
@@ -490,17 +455,17 @@ public class GestorProcesos {
             }
         }
 
-        // Copiar a archivos (si hay espacio)
+        // Copiar a zona de archivos del disco (como respaldo)
         int nuevoInicioArchivos = disco.reservarBloqueArchivo(tamanoInstrucciones);
         if (nuevoInicioArchivos != -1) {
             disco.escribirBloqueArchivo(nuevoInicioArchivos, instruccionesArr);
-            int nuevoFinArchivos = nuevoInicioArchivos + tamanoInstrucciones - 1;
+        }
 
-            // Actualizar el indice ASM
-            if (nombreArchivo != null) {
-                disco.actualizarZona(nombreArchivo, Disco.TIPO_ASM, Disco.ZONA_PRINCIPAL,
-                        nuevoInicioArchivos, nuevoFinArchivos);
-            }
+        // Eliminar del indice ASM (ya no está solo en swap, ahora está en RAM)
+        if (nombreArchivo != null && disco.existe(nombreArchivo, Disco.TIPO_ASM)) {
+            disco.eliminarDelIndice(nombreArchivo, Disco.TIPO_ASM);
+            System.out.println("[DISCO] .asm eliminado del indice (ahora en RAM): "
+                    + nombreArchivo);
         }
 
         // Liberar swap y sacar de la lista de trabajos
@@ -510,8 +475,6 @@ public class GestorProcesos {
         // Crear BCP y admitir en RAM
         BCP bcpRestaurado = new BCP(memoria, direccionBase, id, 1);
         admitirEnParticion(bcpRestaurado, instrucciones, base);
-
-        nombreArchivoPorProceso.put(id, nombreArchivo);
 
         System.out.println("[SWAP] Proceso " + id + " (" + nombreArchivo
                 + ") reactivado desde ListaDeTrabajos (kernel=" + direccionBase
