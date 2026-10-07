@@ -40,7 +40,7 @@ Simulador de una **minicomputadora** con:
 
 ## Video de demostración
 
-[Ver video de demostración en YouTube](https://youtu.be/TU_VIDEO_AQUI)
+[Ver video de demostración en YouTube](https://youtu.be/MwHLnMoiQXY)
 
 > **Nota:** reemplaza el enlace con el del video del Proyecto 1.
 
