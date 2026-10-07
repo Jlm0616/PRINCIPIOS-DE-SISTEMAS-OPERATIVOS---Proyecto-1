@@ -67,8 +67,13 @@ public class PanelConfigDisco extends JPanel {
         gbc.anchor = GridBagConstraints.WEST;
 
         // ==== Etiqueta informativa ====
+        double porcentajeSwapMinimo = 100.0 * TAMANO_SWAP_MINIMO / TAMANO_DISCO_MINIMO;
+        String porcentajeSwapTexto = String.format("%.1f", porcentajeSwapMinimo)
+                .replace(".0", "");   // "12.5%" o "13%" si fuera entero
+
         JLabel lblInfo = new JLabel("Disco minimo: " + TAMANO_DISCO_MINIMO
                 + "  |  Swap minimo: " + TAMANO_SWAP_MINIMO
+                + " (" + porcentajeSwapTexto + "% del disco minimo)"
                 + "  |  Max archivos: " + MAX_ARCHIVOS_MAXIMO);
         lblInfo.setFont(new Font("Segoe UI", Font.ITALIC, 11));
         lblInfo.setForeground(Paleta.TEXTO_NORMAL);

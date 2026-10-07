@@ -43,7 +43,7 @@ import java.util.List;
 public class Disco {
 
     /** Tamaño mínimo del disco (en posiciones). */
-    public static final int TAMANO_MINIMO = 128;
+    public static final int TAMANO_MINIMO = 512;
 
     /** Cantidad máxima de archivos en el índice (configurable). */
     public static final int MAX_ARCHIVOS_DEFAULT = 10;
@@ -67,7 +67,7 @@ public class Disco {
     public static final String TIPO_PROCESO = "PROCESO";
 
     /** Tamaño mínimo de la memoria virtual (swap). */
-    public static final int TAMANO_SWAP_MINIMO = 16;
+    public static final int TAMANO_SWAP_MINIMO = 64;
 
     /** Tamaño por defecto de la memoria virtual (swap). */
     public static final int TAMANO_SWAP_DEFAULT = 64;

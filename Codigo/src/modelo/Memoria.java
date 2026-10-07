@@ -48,7 +48,7 @@ public class Memoria {
     public static final int MAX_BCPS = 5;
 
     /** Tamano minimo de la memoria (configurable por el usuario). */
-    public static final int TAMANO_MINIMO = 128;
+    public static final int TAMANO_MINIMO = 256;
 
     /** Posiciones por entrada de la ListaDeTrabajos (nombre, inicio, fin, zona). */
     public static final int POSICIONES_POR_ENTRADA_LISTA_TRABAJOS = 4;

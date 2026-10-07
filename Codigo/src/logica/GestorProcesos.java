@@ -9,7 +9,9 @@ import modelo.Disco;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Fachada de orquestación del ciclo de vida y ejecución de procesos.
@@ -56,6 +58,9 @@ public class GestorProcesos {
     private List<BCPTerminado> procesosTerminados;
     private List<BCP> procesosBloqueadosInput;
 
+    /** Nombre del archivo .asm asociado a cada id de proceso. */
+    private Map<Integer, String> nombreArchivoPorProceso = new HashMap<>();
+
     private java.util.function.Consumer<String> salidaPantalla;
 
     // Crea el gestor y sus colaboradores (planificador, despachador, etc.).
@@ -101,6 +106,7 @@ public class GestorProcesos {
             if (bcp != null) {
                 // Copiar el .asm a la zona de archivos del disco y registrar en indice ASM
                 copiarAsmAArchivosYRegistrar(nombreArchivo, instrucciones);
+                nombreArchivoPorProceso.put(id, nombreArchivo);
                 siguienteId++;
                 return ResultadoCarga.exito(bcp);
             }
@@ -110,6 +116,7 @@ public class GestorProcesos {
         // 2. Si no cabe, va a swap
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones, id, nombreArchivo);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
+            nombreArchivoPorProceso.put(id, nombreArchivo);
             siguienteId++;
             return resultadoSwap;
         }
@@ -439,6 +446,13 @@ public class GestorProcesos {
 
         memoria.liberarBloqueBCP(bcp.getDireccionBase());
 
+        // === NUEVO: eliminar la entrada del indice ASM (sin liberar la zona de archivos) ===
+        String nombreArchivo = nombreArchivoPorProceso.remove(idProceso);
+        if (nombreArchivo != null && disco.existe(nombreArchivo, Disco.TIPO_ASM)) {
+            disco.eliminarDelIndice(nombreArchivo, Disco.TIPO_ASM);
+            System.out.println("[DISCO] .asm eliminado del indice: " + nombreArchivo);
+        }
+
         reactivarSiguienteProceso();
     }
 
@@ -496,6 +510,8 @@ public class GestorProcesos {
         // Crear BCP y admitir en RAM
         BCP bcpRestaurado = new BCP(memoria, direccionBase, id, 1);
         admitirEnParticion(bcpRestaurado, instrucciones, base);
+
+        nombreArchivoPorProceso.put(id, nombreArchivo);
 
         System.out.println("[SWAP] Proceso " + id + " (" + nombreArchivo
                 + ") reactivado desde ListaDeTrabajos (kernel=" + direccionBase
