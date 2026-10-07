@@ -1,0 +1,2 @@
+LOAD 5
+INT 20H

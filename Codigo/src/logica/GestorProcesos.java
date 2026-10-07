@@ -349,7 +349,9 @@ public class GestorProcesos {
 
     public int ejecutarAutomatico(Runnable onPaso) {
         int pasos = 0;
-        while (hayProcesosActivos()) {
+        int maxPasos = 10000; // <- Evita ciclo infinito
+
+        while (hayProcesosActivos() && pasos < maxPasos) {
 
             if (!procesosBloqueadosInput.isEmpty()) {
                 try {
@@ -373,12 +375,30 @@ public class GestorProcesos {
                 Thread.currentThread().interrupt();
                 break;
             }
+        }
 
-            if (pasos > 100000) {
-                throw new IllegalStateException(
-                    "Demasiados pasos: posible ciclo infinito entre procesos.");
+        // Si se alcanzo el maximo, terminar el proceso actual por seguridad
+        if (pasos >= maxPasos && hayProcesosActivos()) {
+            if (despachador.getEjecutorActual() != null) {
+                BCP actual = despachador.getBcpActual();
+                if (actual != null) {
+                    actual.setEstado(EstadoProceso.EXIT);
+                    actual.marcarFin();
+                    procesoTerminado(actual);
+                    despachador.limpiarEjecutor();
+                }
+            }
+
+            String texto = "[WARNING] Ejecucion automatica detenida: "
+                    + "maximo de pasos (" + maxPasos + ") alcanzado. "
+                    + "Posible ciclo infinito.";
+
+            System.out.println(texto);
+            if (salidaPantalla != null) {
+                salidaPantalla.accept(texto);
             }
         }
+
         return pasos;
     }
 

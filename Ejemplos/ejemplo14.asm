@@ -1,0 +1,4 @@
+MOV AX, 10
+DEC AX
+JNE -3  
+INT 20H

@@ -23,13 +23,9 @@ import java.util.function.Consumer;
  *   AL = resultado (0 exito, 1 error, o contenido leido).
  *
  * IMPORTANTE: todos los archivos creados por procesos (INT 21H) van al
- * INDICE PROCESO del disco, NO al indice ASM. Esto evita conflictos
- * entre los .asm cargados por el usuario y los archivos creados por
- * los procesos en ejecucion.
+ * INDICE PROCESO del disco, NO al indice ASM.
  *
- * Al abrir un archivo, su nombre se agrega a las 5 posiciones de
- * archivos abiertos del BCP (Stallings, Tabla 3.5: "Resource Ownership
- * and Utilization: opened files").
+ * Los mensajes [DISCO] van a consola Y a PanelPantalla (via callback).
  */
 public class Interrupciones {
 
@@ -70,7 +66,6 @@ public class Interrupciones {
 
     /**
      * INT 10H: imprime en pantalla el valor de DX.
-     * DX puede ser un numero o un string.
      */
     private ResultadoInterrupcion ejecutarImprimirPantalla(BCP bcp) {
         String mensaje = "[PANTALLA] DX = " + bcp.getDx();
@@ -89,9 +84,6 @@ public class Interrupciones {
 
     /**
      * INT 21H: manejo de archivos.
-     *
-     * DX contiene el nombre del archivo como String.
-     * Todos los archivos creados por procesos van al INDICE PROCESO.
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
@@ -104,7 +96,7 @@ public class Interrupciones {
         // Validacion: nombre vacio
         if (nombre == null || nombre.isEmpty()) {
             bcp.setAl(1);
-            System.out.println("[DISCO] ERROR: nombre de archivo vacio (DX=\"" + nombre + "\")");
+            enviarMensaje("[DISCO] ERROR: nombre de archivo vacio (DX=\"" + nombre + "\")");
             return ResultadoInterrupcion.BLOQUEADO;
         }
 
@@ -112,23 +104,23 @@ public class Interrupciones {
             case 0x3C: {  // crear archivo
                 boolean creado = crearArchivoEnDisco(nombre);
                 bcp.setAl(creado ? 0 : 1);
-                System.out.println("[DISCO] crear(\"" + nombre + "\") = " + creado);
+                enviarMensaje("[DISCO] crear(\"" + nombre + "\") = " + creado);
                 break;
             }
 
             case 0x3D: {  // abrir archivo
                 if (!existeArchivoProceso(nombre)) {
                     bcp.setAl(1);   // archivo no existe
-                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = NO EXISTE");
+                    enviarMensaje("[DISCO] abrir(\"" + nombre + "\") = NO EXISTE");
                     break;
                 }
                 boolean abierto = bcp.abrirArchivo(nombre);
                 if (abierto) {
                     bcp.setAl(0);
-                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = OK");
+                    enviarMensaje("[DISCO] abrir(\"" + nombre + "\") = OK");
                 } else {
                     bcp.setAl(1);
-                    System.out.println("[DISCO] abrir(\"" + nombre + "\") = ERROR (max "
+                    enviarMensaje("[DISCO] abrir(\"" + nombre + "\") = ERROR (max "
                             + BCP.TAMANO_MAXIMO_ARCHIVOS + " archivos abiertos)");
                 }
                 break;
@@ -141,7 +133,7 @@ public class Interrupciones {
                 } else {
                     bcp.setAl(0);
                 }
-                System.out.println("[DISCO] leer(\"" + nombre + "\") = \"" + contenido + "\"");
+                enviarMensaje("[DISCO] leer(\"" + nombre + "\") = \"" + contenido + "\"");
                 break;
             }
 
@@ -150,7 +142,7 @@ public class Interrupciones {
                 String aEscribir = String.valueOf((char) al);
                 boolean escrito = escribirArchivoEnDisco(nombre, aEscribir);
                 bcp.setAl(escrito ? 0 : 1);
-                System.out.println("[DISCO] escribir(\"" + nombre + "\", \"" + aEscribir + "\")");
+                enviarMensaje("[DISCO] escribir(\"" + nombre + "\", \"" + aEscribir + "\")");
                 break;
             }
 
@@ -159,13 +151,14 @@ public class Interrupciones {
 
                 boolean eliminado = eliminarArchivoDeDisco(nombre);
                 bcp.setAl(eliminado ? 0 : 1);
-                System.out.println("[DISCO] eliminar(\"" + nombre + "\") = " + eliminado);
+                enviarMensaje("[DISCO] eliminar(\"" + nombre + "\") = " + eliminado);
                 break;
             }
 
             default: {
                 bcp.setAl(0xFF);
-                System.out.println("[DISCO] operacion desconocida: AH=" + Integer.toHexString(ah));
+                enviarMensaje("[DISCO] operacion desconocida: AH="
+                        + Integer.toHexString(ah));
                 break;
             }
         }
@@ -173,18 +166,24 @@ public class Interrupciones {
         return ResultadoInterrupcion.BLOQUEADO;
     }
 
-    /* ==================== HELPERS DE ARCHIVOS ==================== */
+    /* ==================== HELPER DE MENSAJES ==================== */
 
     /**
-     * Verifica si un archivo creado por un proceso existe en el INDICE PROCESO.
+     * Envia un mensaje a consola Y a PanelPantalla (si hay callback).
      */
+    private void enviarMensaje(String texto) {
+        System.out.println(texto);
+        if (salidaPantalla != null) {
+            salidaPantalla.accept(texto);
+        }
+    }
+
+    /* ==================== HELPERS DE ARCHIVOS ==================== */
+
     private boolean existeArchivoProceso(String nombre) {
         return disco.existe(nombre, Disco.TIPO_PROCESO);
     }
 
-    /**
-     * Crea un archivo en el INDICE PROCESO (no en el indice ASM).
-     */
     private boolean crearArchivoEnDisco(String nombre) {
         if (existeArchivoProceso(nombre)) return false;
 

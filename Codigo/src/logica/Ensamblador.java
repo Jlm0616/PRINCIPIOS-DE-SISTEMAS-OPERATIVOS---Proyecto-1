@@ -12,40 +12,18 @@ import java.io.File;
 import java.util.Scanner;
 
 /**
- * Ensamblador de la máquina virtual (Proyecto 1).
+ * Ensamblador de la maquina virtual (Proyecto 1).
  *
- * Se encarga de dos tareas:
- *   1. Validar un archivo .asm completo (sintaxis, cantidad de argumentos,
- *      registros conocidos, valores numéricos válidos).
- *   2. Leerlo y convertirlo en una lista de objetos {@link Instruccion}.
- *
- * Formato de línea general:
- *   OPCODE [ARG1[, ARG2[, ARG3]]]
- *
- * Ejemplos válidos:
- *   INC
- *   LOAD AX
- *   MOV BX, AX
- *   MOV BX, 5
- *   MOV AH, 3Ch      ; 3C en hexadecimal = 60 en decimal
- *   MOV AL, 40h
- *   MOV DX, "datos.txt"   ; string literal para INT 21H
- *   SWAP AX, BX
- *   JMP +3
- *   INT 20H
- *   CMP AX, BX
- *   PARAM 5, 10, 3
- *   PUSH AX
- *
- * Los números pueden estar en decimal ("5", "10") o en hexadecimal
- * ("3Ch", "40H"). El sufijo 'h' o 'H' indica hexadecimal.
- *
- * Los strings van entre comillas dobles y solo son válidos como segundo
- * argumento de MOV (ej. MOV DX, "datos.txt").
+ * VALIDACIONES:
+ *   1. Archivo existe y es legible.
+ *   2. Extension .asm.
+ *   3. Al menos 1 instruccion.
+ *   4. Sintaxis de cada linea (opcode, argumentos, registros, numeros).
+ *   5. Debe contener al menos un 'INT 20H' para finalizar el programa.
  */
 public class Ensamblador {
 
-    /** Cantidad mínima y máxima de argumentos permitida por opcode. */
+    /** Cantidad minima y maxima de argumentos permitida por opcode. */
     private static final Map<String, int[]> RANGO_ARGUMENTOS = new HashMap<>();
     static {
         RANGO_ARGUMENTOS.put("LOAD",  new int[]{1, 1});
@@ -70,19 +48,19 @@ public class Ensamblador {
     private static final Set<String> PRIMER_ARG_REGISTRO = new HashSet<>(Arrays.asList(
             "LOAD", "STORE", "ADD", "SUB", "INC", "DEC", "SWAP", "CMP", "PUSH", "POP", "MOV"));
 
-    /** Opcodes de salto, cuyo único argumento es un desplazamiento con signo. */
+    /** Opcodes de salto, cuyo unico argumento es un desplazamiento con signo. */
     private static final Set<String> OPCODES_SALTO = new HashSet<>(Arrays.asList("JMP", "JE", "JNE"));
 
-    /** Registros válidos que pueden usarse como argumento en las instrucciones. */
+    /** Registros validos que pueden usarse como argumento en las instrucciones. */
     private static final Set<String> REGISTROS_VALIDOS = new HashSet<>(
             Arrays.asList("AC", "AX", "BX", "CX", "DX", "AH", "AL"));
 
-    /** Patrón esperado para códigos de interrupción, ej. "20H", "09H". */
+    /** Patron esperado para codigos de interrupcion, ej. "20H", "09H". */
     private static final String PATRON_CODIGO_INTERRUPCION = "^[0-9A-Fa-f]{2}[Hh]$";
 
     private List<String> erroresEncontrados;
 
-    /* ==================== VALIDACIÓN DE ARCHIVO ==================== */
+    /* ==================== VALIDACION DE ARCHIVO ==================== */
 
     public boolean esArchivoValido(File archivo) {
         erroresEncontrados = new ArrayList<>();
@@ -99,6 +77,7 @@ public class Ensamblador {
 
         int numeroLinea = 0;
         boolean tieneAlMenosUnaInstruccion = false;
+        boolean tieneInt20H = false;
 
         try (Scanner lector = new Scanner(archivo)) {
             while (lector.hasNextLine()) {
@@ -110,8 +89,14 @@ public class Ensamblador {
                 }
 
                 try {
-                    parsearLinea(linea);
+                    Instruccion instr = parsearLinea(linea);
                     tieneAlMenosUnaInstruccion = true;
+
+                    // Verificar si es INT 20H
+                    if ("INT".equals(instr.getOpcode())
+                            && instr.getCodigoInterrupcion(0) == 0x20) {
+                        tieneInt20H = true;
+                    }
                 } catch (IllegalArgumentException e) {
                     erroresEncontrados.add("Linea " + numeroLinea + ": " + e.getMessage()
                             + "\n-> \"" + linea + "\"");
@@ -124,6 +109,12 @@ public class Ensamblador {
 
         if (!tieneAlMenosUnaInstruccion) {
             erroresEncontrados.add("El archivo no contiene ninguna instruccion.");
+        }
+
+        // === VALIDACION: debe tener INT 20H ===
+        if (!tieneInt20H) {
+            erroresEncontrados.add(
+                "El archivo debe contener al menos un 'INT 20H' para finalizar el programa.");
         }
 
         return erroresEncontrados.isEmpty();
@@ -164,12 +155,6 @@ public class Ensamblador {
 
     /* ==================== PARSEO CENTRAL ==================== */
 
-    /**
-     * Analiza una línea de código y construye la instrucción correspondiente.
-     *
-     * El parseo de argumentos respeta strings entre comillas: las comas
-     * dentro de un string NO se consideran separadores.
-     */
     private Instruccion parsearLinea(String linea) {
         int primerEspacio = linea.indexOf(' ');
         String opcode = (primerEspacio == -1) ? linea : linea.substring(0, primerEspacio);
@@ -197,18 +182,6 @@ public class Ensamblador {
         return new Instruccion(opcode, argumentos);
     }
 
-    /**
-     * Parsea la lista de argumentos separando por comas, pero respetando
-     * strings entre comillas dobles.
-     *
-     * Ejemplos:
-     *   "BX, AX"            → ["BX", "AX"]
-     *   "DX, \"datos.txt\"" → ["DX", "\"datos.txt\""]
-     *   "DX, \"a,b.txt\""   → ["DX", "\"a,b.txt\""]   (la coma NO separa)
-     *
-     * @param resto texto de argumentos sin el opcode
-     * @return lista de argumentos
-     */
     private List<String> parsearArgumentos(String resto) {
         List<String> argumentos = new ArrayList<>();
         if (resto == null || resto.isEmpty()) {
@@ -239,28 +212,23 @@ public class Ensamblador {
         return argumentos;
     }
 
-    /**
-     * Valida el tipo de cada argumento según las reglas del opcode dado.
-     */
     private void validarArgumentos(String opcode, List<String> argumentos) {
 
-        // Saltos: un solo argumento, debe ser un entero con o sin signo
         if (OPCODES_SALTO.contains(opcode)) {
             validarEntero(argumentos.get(0), "desplazamiento");
             return;
         }
 
-        // Interrupciones: un solo argumento, formato de codigo (ej. "20H")
         if (opcode.equals("INT")) {
             String codigo = argumentos.get(0);
             if (!codigo.matches(PATRON_CODIGO_INTERRUPCION)) {
                 throw new IllegalArgumentException(
-                        "codigo de interrupcion invalido '" + codigo + "', se esperaba formato como '20H'");
+                        "codigo de interrupcion invalido '" + codigo
+                        + "', se esperaba formato como '20H'");
             }
             return;
         }
 
-        // PARAM: todos los argumentos deben ser numericos
         if (opcode.equals("PARAM")) {
             for (String arg : argumentos) {
                 validarEntero(arg, "parametro");
@@ -268,27 +236,22 @@ public class Ensamblador {
             return;
         }
 
-        // MOV: primer argumento siempre registro; segundo puede ser:
-        //   - registro
-        //   - numero
-        //   - string literal (entre comillas)
         if (opcode.equals("MOV")) {
             validarRegistro(argumentos.get(0));
             String segundo = argumentos.get(1);
 
             if (REGISTROS_VALIDOS.contains(segundo.toUpperCase())) {
-                return;   // es un registro
+                return;
             }
 
             if (esStringLiteral(segundo)) {
-                return;   // es un string literal
+                return;
             }
 
             validarEntero(segundo, "valor");
             return;
         }
 
-        // Resto de opcodes con argumentos de registro
         if (PRIMER_ARG_REGISTRO.contains(opcode)) {
             for (String arg : argumentos) {
                 validarRegistro(arg);
@@ -296,18 +259,12 @@ public class Ensamblador {
         }
     }
 
-    /**
-     * Verifica si un argumento es un string literal (entre comillas dobles).
-     */
     private boolean esStringLiteral(String arg) {
         if (arg == null) return false;
         String s = arg.trim();
         return s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"");
     }
 
-    /**
-     * Valida que un texto sea un nombre de registro conocido.
-     */
     private void validarRegistro(String arg) {
         if (!REGISTROS_VALIDOS.contains(arg.toUpperCase())) {
             throw new IllegalArgumentException(
@@ -315,10 +272,6 @@ public class Ensamblador {
         }
     }
 
-    /**
-     * Valida que un texto sea un número entero válido.
-     * Acepta decimal ("5") o hexadecimal ("3Ch").
-     */
     private void validarEntero(String arg, String descripcion) {
         try {
             parsearNumero(arg);
@@ -330,28 +283,15 @@ public class Ensamblador {
 
     /* ==================== HELPERS DE NUMEROS ==================== */
 
-    /**
-     * Parsea un numero que puede estar en decimal o hexadecimal.
-     *
-     * Formato:
-     *   - Hexadecimal: termina en 'h' o 'H' (ej. "3Ch", "40H", "0A0h").
-     *   - Decimal: sin sufijo (ej. "5", "10", "-3").
-     *
-     * @param arg numero en texto
-     * @return el valor entero
-     * @throws NumberFormatException si no es un numero valido
-     */
     public static int parsearNumero(String arg) {
         if (arg == null || arg.isEmpty()) {
             throw new NumberFormatException("numero vacio");
         }
         String s = arg.trim();
         if (s.toLowerCase().endsWith("h")) {
-            // Hexadecimal
             String sinH = s.substring(0, s.length() - 1);
             return Integer.parseInt(sinH, 16);
         } else {
-            // Decimal
             return Integer.parseInt(s);
         }
     }

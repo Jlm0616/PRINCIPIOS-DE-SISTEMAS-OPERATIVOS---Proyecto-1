@@ -1,0 +1,4 @@
+MOV DX, ""
+MOV AH, 3Ch
+INT 21H
+INT 20H

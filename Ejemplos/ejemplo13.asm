@@ -1,0 +1,19 @@
+MOV AH, 3Ch
+MOV DX, "a.txt"
+INT 21H
+MOV AH, 3Ch
+MOV DX, "b.txt"
+INT 21H
+MOV AH, 3Ch
+MOV DX, "c.txt"
+INT 21H
+MOV AH, 3Ch
+MOV DX, "d.txt"
+INT 21H
+MOV AH, 3Ch
+MOV DX, "e.txt"
+INT 21H
+MOV AH, 3Ch
+MOV DX, "f.txt"
+INT 21H
+INT 20H

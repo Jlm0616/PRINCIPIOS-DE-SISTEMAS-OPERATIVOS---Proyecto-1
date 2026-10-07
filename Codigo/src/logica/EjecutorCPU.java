@@ -10,28 +10,14 @@ import modelo.Disco;
 /**
  * Ejecutor del ciclo de instrucción (fetch-decode-execute) para el Proyecto 1.
  *
- * Modelo de tiempo:
- *   - Cada instrucción tiene un "peso" (segundos de CPU) definido en
- *     Instruccion.getPeso(), según la tabla del enunciado.
- *   - El botón "Siguiente" de la GUI = 1 segundo de CPU.
- *   - Una instrucción de peso N tarda N segundos en completarse.
- *   - Las instrucciones son ATÓMICAS: el cambio de contexto ocurre solo
- *     al completarse una instrucción (Stallings, sección 3.4).
- *   - El peso pendiente vive en el BCP (estado del proceso), para que
- *     sobreviva a un cambio de contexto (round-robin).
+ * VALIDACIONES DE PC:
+ *   - Si el PC apunta fuera del alcance del proceso, termina con EXIT y error.
+ *   - Si un salto (JMP/JE/JNE) cae fuera del alcance, termina con EXIT.
+ *   - Si el PC llega al final del proceso sin salto, termina normalmente.
  *
- * Ciclo:
- *   1. Si no hay instrucción en curso, leer la del PC y calcular su peso.
- *   2. Consumir 1 segundo del peso pendiente.
- *   3. Si el peso llega a 0: ejecutar la instrucción completa
- *      (efectos + avance de PC + sincronización con BCP).
- *
- * Las interrupciones (INT) se delegan a la clase Interrupciones, que
- * encapsula la logica de las llamadas al sistema.
- *
- * IMPORTANTE: DX es un String. Esto permite guardar nombres de archivo
- * (ej. "datos.txt") para INT 21H. Para operaciones aritmeticas con DX,
- * se usa getDXAsInt() / setDXAsInt() que parsean/convierten el string.
+ * Los mensajes de fin y error se envian a:
+ *   - Consola (System.out.println) para debugging.
+ *   - PanelPantalla (via callback salidaPantalla) para el usuario.
  */
 public class EjecutorCPU {
 
@@ -40,12 +26,13 @@ public class EjecutorCPU {
     private BCP bcp;
     private Interrupciones interrupciones;
 
+    /** Callback para enviar mensajes a la pantalla de la GUI. */
+    private java.util.function.Consumer<String> salidaPantalla;
+
     /** Indica si el programa ya terminó (INT 20H, EXIT, o error fatal). */
     private boolean programaTerminado;
 
-    /** Máximo de segundos de CPU en modo automático antes de considerar
-     *  el proceso colgado (salvaguarda). */
-    public static final int MAX_CICLOS_AUTOMATICO = 10000;
+    public static final int MAX_CICLOS_AUTOMATICO = 1;
 
     public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp, Disco disco) {
         this.cpu = cpu;
@@ -55,7 +42,7 @@ public class EjecutorCPU {
         this.programaTerminado = false;
     }
 
-    /* ==================== CICLO PRINCIPAL (por segundo) ==================== */
+    /* ==================== CICLO PRINCIPAL ==================== */
 
     public boolean ejecutarSegundoDeCPU() {
         if (programaTerminado) {
@@ -64,15 +51,19 @@ public class EjecutorCPU {
 
         if (bcp.getPesoPendiente() == 0) {
             int pc = cpu.getPC();
+
+            // === VALIDACION 1: PC dentro del alcance ===
+            if (!esPcValido(pc)) {
+                terminarConError("PC fuera del alcance (PC=" + pc
+                        + ", base=" + bcp.getBase()
+                        + ", alcance=" + bcp.getAlcance() + ")");
+                return true;
+            }
+
             Instruccion instr = memoria.leerInstruccion(pc);
 
             if (instr == null) {
-                bcp.setEstado(EstadoProceso.EXIT);
-                bcp.marcarFin();
-                programaTerminado = true;
-                bcp.actualizarDesdeCPU(cpu);
-                System.out.println("[FIN] Proceso " + bcp.getId()
-                        + " terminó: no hay más instrucciones en la posición " + pc);
+                terminarNormal("no hay más instrucciones en la posición " + pc);
                 return true;
             }
 
@@ -93,21 +84,23 @@ public class EjecutorCPU {
         try {
             saltoEjecutado = ejecutarOperacion(instr, pc);
         } catch (IllegalStateException e) {
-            bcp.setEstado(EstadoProceso.EXIT);
-            bcp.marcarFin();
-            programaTerminado = true;
-            bcp.actualizarDesdeCPU(cpu);
-            System.out.println("[ERROR FATAL] Proceso " + bcp.getId()
-                    + " terminado: " + e.getMessage());
+            terminarConError(e.getMessage());
             return true;
         }
 
         if (!saltoEjecutado) {
-            cpu.setPC(pc + 1);
+            int nuevoPc = pc + 1;
+
+            // === VALIDACION 2: PC despues de avanzar ===
+            if (!esPcValido(nuevoPc)) {
+                terminarNormal("PC llegó al final del proceso (" + nuevoPc + ")");
+                return true;
+            }
+
+            cpu.setPC(nuevoPc);
         }
 
         bcp.actualizarDesdeCPU(cpu);
-
         return true;
     }
 
@@ -118,15 +111,54 @@ public class EjecutorCPU {
             segundos++;
         }
         if (segundos >= MAX_CICLOS_AUTOMATICO) {
-            System.out.println("[WARNING] Proceso " + bcp.getId()
-                    + " alcanzó el máximo de segundos (" + MAX_CICLOS_AUTOMATICO
-                    + "). Posible ciclo infinito. Terminando por seguridad.");
-            bcp.setEstado(EstadoProceso.EXIT);
-            bcp.marcarFin();
-            programaTerminado = true;
-            bcp.actualizarDesdeCPU(cpu);
+            terminarConError("Máximo de ciclos alcanzado (posible ciclo infinito)");
         }
         return segundos;
+    }
+
+    /* ==================== VALIDACIONES ==================== */
+
+    private boolean esPcValido(int pc) {
+        int base = bcp.getBase();
+        int alcance = bcp.getAlcance();
+        return pc >= base && pc < base + alcance;
+    }
+
+    /**
+     * Termina el proceso con un error fatal (EXIT).
+     * Envia el mensaje a consola Y a pantalla.
+     */
+    private void terminarConError(String mensaje) {
+        bcp.setEstado(EstadoProceso.EXIT);
+        bcp.marcarFin();
+        programaTerminado = true;
+        bcp.actualizarDesdeCPU(cpu);
+
+        String texto = "[ERROR FATAL] Proceso " + bcp.getId()
+                + " terminado: " + mensaje;
+
+        System.out.println(texto);
+        if (salidaPantalla != null) {
+            salidaPantalla.accept(texto);
+        }
+    }
+
+    /**
+     * Termina el proceso normalmente (EXIT).
+     * Envia el mensaje a consola Y a pantalla.
+     */
+    private void terminarNormal(String motivo) {
+        bcp.setEstado(EstadoProceso.EXIT);
+        bcp.marcarFin();
+        programaTerminado = true;
+        bcp.actualizarDesdeCPU(cpu);
+
+        String texto = "[FIN] Proceso " + bcp.getId() + " terminó: " + motivo;
+
+        System.out.println(texto);
+        if (salidaPantalla != null) {
+            salidaPantalla.accept(texto);
+        }
     }
 
     /* ==================== EJECUCIÓN POR OPCODE ==================== */
@@ -181,23 +213,47 @@ public class EjecutorCPU {
                 ejecutarCMP(instr);
                 return false;
 
-            case "JMP":
-                cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+            case "JMP": {
+                int nuevoPc = pc + 1 + instr.getArgumentoComoEntero(0);
+                if (!esPcValido(nuevoPc)) {
+                    terminarConError("JMP fuera del alcance (PC=" + nuevoPc
+                            + ", base=" + bcp.getBase()
+                            + ", alcance=" + bcp.getAlcance() + ")");
+                    return true;
+                }
+                cpu.setPC(nuevoPc);
                 return true;
+            }
 
-            case "JE":
+            case "JE": {
                 if (cpu.getBanderaIgual()) {
-                    cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+                    int nuevoPc = pc + 1 + instr.getArgumentoComoEntero(0);
+                    if (!esPcValido(nuevoPc)) {
+                        terminarConError("JE fuera del alcance (PC=" + nuevoPc
+                                + ", base=" + bcp.getBase()
+                                + ", alcance=" + bcp.getAlcance() + ")");
+                        return true;
+                    }
+                    cpu.setPC(nuevoPc);
                     return true;
                 }
                 return false;
+            }
 
-            case "JNE":
+            case "JNE": {
                 if (!cpu.getBanderaIgual()) {
-                    cpu.setPC(pc + 1 + instr.getArgumentoComoEntero(0));
+                    int nuevoPc = pc + 1 + instr.getArgumentoComoEntero(0);
+                    if (!esPcValido(nuevoPc)) {
+                        terminarConError("JNE fuera del alcance (PC=" + nuevoPc
+                                + ", base=" + bcp.getBase()
+                                + ", alcance=" + bcp.getAlcance() + ")");
+                        return true;
+                    }
+                    cpu.setPC(nuevoPc);
                     return true;
                 }
                 return false;
+            }
 
             case "PUSH":
                 bcp.apilar(leerRegistro(instr.getArgumento(0)));
@@ -225,30 +281,19 @@ public class EjecutorCPU {
 
     /* ==================== HELPERS POR INSTRUCCIÓN ==================== */
 
-    /**
-     * Ejecuta MOV destino, fuente.
-     *
-     * Casos:
-     *   1. MOV DX, "texto"     → asigna string literal a DX
-     *   2. MOV reg, reg        → copia valor entre registros
-     *   3. MOV reg, numero     → asigna numero a registro
-     */
     private void ejecutarMOV(Instruccion instr) {
         String destino = instr.getArgumento(0);
 
-        // Caso 1: MOV DX, "texto" (string literal)
         if (instr.cantidadArgumentos() >= 2 && instr.esStringLiteral(1)) {
             escribirRegistroString(destino, instr.getStringLiteral(1));
             return;
         }
 
-        // Caso 2: MOV reg, reg
         if (instr.cantidadArgumentos() >= 2 && instr.esRegistro(1)) {
             escribirRegistro(destino, leerRegistro(instr.getArgumento(1)));
             return;
         }
 
-        // Caso 3: MOV reg, numero
         escribirRegistro(destino, instr.getArgumentoComoEntero(1));
     }
 
@@ -305,6 +350,7 @@ public class EjecutorCPU {
     /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
 
     public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
+        this.salidaPantalla = callback;
         interrupciones.setSalidaPantalla(callback);
     }
 
@@ -323,21 +369,13 @@ public class EjecutorCPU {
         return (v >= 32768) ? v - 65536 : v;
     }
 
-    /**
-     * Lee el valor de un registro por nombre.
-     *
-     * DX se parsea como entero (getDXAsInt).
-     * Si DX contiene un texto no numerico, devuelve 0.
-     *
-     * AH y AL son mitades de AX.
-     */
     private int leerRegistro(String nombre) {
         switch (nombre) {
             case "AC": return cpu.getAC();
             case "AX": return cpu.getAX();
             case "BX": return cpu.getBX();
             case "CX": return cpu.getCX();
-            case "DX": return cpu.getDXAsInt();   // ← CAMBIO: parsea String
+            case "DX": return cpu.getDXAsInt();
             case "AH": return (cpu.getAX() >> 8) & 0xFF;
             case "AL": return cpu.getAX() & 0xFF;
             default:
@@ -345,11 +383,6 @@ public class EjecutorCPU {
         }
     }
 
-    /**
-     * Escribe un valor entero en un registro por nombre.
-     *
-     * DX se escribe como String (setDXAsInt).
-     */
     private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
         switch (nombre) {
@@ -357,7 +390,7 @@ public class EjecutorCPU {
             case "AX": cpu.setAX(valorLimitado); break;
             case "BX": cpu.setBX(valorLimitado); break;
             case "CX": cpu.setCX(valorLimitado); break;
-            case "DX": cpu.setDXAsInt(valorLimitado); break;   // ← CAMBIO
+            case "DX": cpu.setDXAsInt(valorLimitado); break;
             case "AH": {
                 int al = cpu.getAX() & 0xFF;
                 cpu.setAX(((valorLimitado & 0xFF) << 8) | al);
@@ -373,12 +406,6 @@ public class EjecutorCPU {
         }
     }
 
-    /**
-     * Escribe un String en un registro.
-     *
-     * Solo DX acepta strings. Otros registros intentan parsear el string
-     * como entero.
-     */
     private void escribirRegistroString(String nombre, String valor) {
         if ("DX".equals(nombre)) {
             cpu.setDX(valor);
