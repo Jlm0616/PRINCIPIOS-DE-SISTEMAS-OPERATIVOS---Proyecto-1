@@ -1,8 +1,7 @@
 #Configuracion del Sistema - Proyecto 1 SO
-#Mon Oct 05 00:43:12 CST 2026
+#Tue Oct 06 18:03:14 CST 2026
 disco=512
 kernel=77
-max_archivos=10
-max_procesos=5
+max_archivos=9
 memoria=256
 memoria_virtual=64

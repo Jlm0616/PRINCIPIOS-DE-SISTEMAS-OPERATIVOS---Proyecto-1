@@ -4,7 +4,6 @@ import modelo.BCP;
 import modelo.EstadoProceso;
 import logica.ListaProcesos;
 import logica.ListaDeTrabajos;
-import logica.ProcesoEnEspera;
 
 import javax.swing.JPanel;
 import javax.swing.JTable;
@@ -34,6 +33,9 @@ import java.util.Set;
  *     * En RAM: READY, RUNNING, BLOCKED.
  *     * En disco: NEW (esperando entrar a RAM).
  *   - Abajo: el BCP del proceso actual.
+ *
+ * La Lista de Trabajos ahora viene de una estructura en RAM que guarda
+ * [nombre, inicio, fin, zona] por cada .asm que espera entrar a RAM.
  */
 public class PanelProcesos extends JPanel {
 
@@ -219,10 +221,10 @@ public class PanelProcesos extends JPanel {
 
     /**
      * Actualiza la tabla con todos los procesos:
-     *   - ListaProcesos: procesos en RAM (READY, RUNNING, BLOCKED).
-     *   - Proceso actual: el que esta en la CPU (RUNNING).
+     *   - Proceso actual: el que esta en la CPU (RUNNING o BLOCKED por IO).
+     *   - ListaProcesos: procesos en RAM (READY, BLOCKED).
      *   - Procesos bloqueados por input: esperando teclado.
-     *   - ListaDeTrabajos: procesos en disco (NEW).
+     *   - ListaDeTrabajos: procesos en disco (NEW), leidos desde RAM.
      *
      * Evita duplicados usando un Set de IDs.
      */
@@ -267,14 +269,14 @@ public class PanelProcesos extends JPanel {
         }
 
         // 4. Lista de trabajos (procesos en disco, NEW)
+        //    Ahora la lista devuelve Object[]: [nombre, inicio, fin, zona]
         if (listaDeTrabajos != null) {
-            for (ProcesoEnEspera pe : listaDeTrabajos.toList()) {
-                if (idsAgregados.add(pe.getId())) {
-                    modeloProcesos.addRow(new Object[]{
-                        "ID " + pe.getId(),
-                        pe.getEstado().toString()
-                    });
-                }
+            for (Object[] trabajo : listaDeTrabajos.toList()) {
+                String nombre = (trabajo[0] != null) ? trabajo[0].toString() : "(?)";
+                modeloProcesos.addRow(new Object[]{
+                    nombre,
+                    "NEW"
+                });
             }
         }
     }

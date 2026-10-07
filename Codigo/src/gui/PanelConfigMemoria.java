@@ -24,9 +24,14 @@ import java.awt.Insets;
  * con auto-sugerencia del 30% para el limite.
  *
  * REGLA: el limite del kernel SIEMPRE debe ser al menos el 30% de la
- * memoria total. Si con ese 30% no caben los BCPs configurados, el
- * sistema lo avisara al inicializar y el usuario debera agrandar la RAM
- * o reducir maxProcesos.
+ * memoria total.
+ *
+ * IMPORTANTE: NO se exige que quepan todos los maxProcesos. Si el kernel
+ * solo alcanza para 1 BCP, los procesos sobrantes van a la ListaDeTrabajos
+ * (swap) y esperan a que se libere RAM. Esto cumple con el enunciado:
+ *
+ *   "En el caso de que no exista espacio para almacenar un proceso en
+ *    memoria principal, este debe esperar hasta que sea liberado."
  *
  * No crea objetos Memoria: eso lo hace quien lo use (VentanaConfiguracion).
  */
@@ -50,8 +55,23 @@ public class PanelConfigMemoria extends JPanel {
     /** Cantidad de procesos configurada (para mostrar info en la ayuda). */
     private final int maxProcesos;
 
+    /** Cantidad de archivos configurada (para mostrar info en la ayuda). */
+    private final int maxArchivos;
+
+    /**
+     * Constructor SIN maxArchivos (mantiene compatibilidad).
+     */
     public PanelConfigMemoria(int tamanoActual, int limiteActual, int maxProcesos) {
+        this(tamanoActual, limiteActual, maxProcesos, 10);
+    }
+
+    /**
+     * Constructor COMPLETO.
+     */
+    public PanelConfigMemoria(int tamanoActual, int limiteActual,
+                               int maxProcesos, int maxArchivos) {
         this.maxProcesos = maxProcesos;
+        this.maxArchivos = maxArchivos;
         construirInterfaz(tamanoActual, limiteActual);
     }
 
@@ -75,7 +95,7 @@ public class PanelConfigMemoria extends JPanel {
         gbc.insets = new Insets(6, 6, 6, 6);
         gbc.anchor = GridBagConstraints.WEST;
 
-        // ==== Etiqueta informativa (arriba, ocupa 2 columnas) ====
+        // ==== Etiqueta informativa ====
         int porcentajeMostrar = (int) (PORCENTAJE_MINIMO_KERNEL * 100);
         JLabel lblInfo = new JLabel("Minimo permitido: " + Memoria.TAMANO_MINIMO
                 + "  |  Maximo permitido: " + TAMANO_MAXIMO
@@ -113,16 +133,27 @@ public class PanelConfigMemoria extends JPanel {
         add(txtLimiteKernel, gbc);
 
         // ==== Fila 3: Texto de ayuda ====
-        int kernelMinimoReal = Memoria.getTamanoKernelMinimo(maxProcesos);
+        int kernelMinimoReal = Memoria.getTamanoKernelMinimo(maxProcesos, maxArchivos);
+        int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1, maxArchivos);
+        int tamanoListaTrabajos = maxArchivos * Memoria.POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
+
         JLabel lblAyuda = new JLabel("<html><body style='width: 420px'>"
                 + "Posiciones 0 a (limite-1) = zona <b>Kernel</b>.<br>"
                 + "Posiciones limite a (tamano-1) = zona <b>Usuario</b>.<br><br>"
                 + "El kernel debe ocupar al menos el <b>" + porcentajeMostrar + "%</b> "
-                + "de la memoria.<br>"
-                + "Con <b>" + maxProcesos + " procesos</b> configurados, el kernel "
-                + "necesita al menos <b>" + kernelMinimoReal + "</b> posiciones.<br><br>"
-                + "Si el 30% no alcanza, aumenta la memoria o reduce "
-                + "max_procesos en config.txt."
+                + "de la memoria.<br><br>"
+                + "Con <b>" + maxProcesos + " procesos</b> y <b>" + maxArchivos
+                + " archivos</b>, el kernel <b>ideal</b> necesita <b>"
+                + kernelMinimoReal + "</b> posiciones:<br>"
+                + "&nbsp;&nbsp;ListaDeTrabajos = " + tamanoListaTrabajos
+                + " (" + maxArchivos + " × " + Memoria.POSICIONES_POR_ENTRADA_LISTA_TRABAJOS + ")<br>"
+                + "&nbsp;&nbsp;BCPs + TablaMemoria = "
+                + (kernelMinimoReal - tamanoListaTrabajos) + "<br><br>"
+                + "<b>Minimo real:</b> " + kernelMinimoParaUno
+                + " posiciones (para 1 proceso).<br><br>"
+                + "<b>Si el kernel no alcanza para todos, los procesos sobrantes "
+                + "iran a la ListaDeTrabajos (swap) y esperaran a que se libere "
+                + "espacio en RAM.</b>"
                 + "</body></html>");
         lblAyuda.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         lblAyuda.setForeground(new Color(0x60, 0x60, 0x60));
@@ -132,7 +163,7 @@ public class PanelConfigMemoria extends JPanel {
         gbc.insets = new Insets(15, 6, 6, 6);
         add(lblAyuda, gbc);
 
-        // ==== Listeners (igual que antes) ====
+        // ==== Listeners ====
         txtTamanoMemoria.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) { sugerirLimite(); }
             @Override public void removeUpdate(DocumentEvent e) { sugerirLimite(); }
@@ -152,9 +183,6 @@ public class PanelConfigMemoria extends JPanel {
         });
     }
 
-    /**
-     * Crea una etiqueta con el estilo de la paleta (fuente mono, color normal).
-     */
     private JLabel crearLabelCampo(String texto) {
         JLabel label = new JLabel(texto + ":");
         label.setFont(Paleta.FUENTE_LABEL_BOLD);
@@ -162,9 +190,6 @@ public class PanelConfigMemoria extends JPanel {
         return label;
     }
 
-    /**
-     * Crea un campo de texto estilizado (fuente mono, borde verde, padding).
-     */
     private JTextField crearCampoTexto(String valorInicial) {
         JTextField campo = new JTextField(valorInicial, 12);
         campo.setFont(Paleta.FUENTE_MONO);
@@ -203,8 +228,10 @@ public class PanelConfigMemoria extends JPanel {
      *   3. Kernel < memoria.
      *   4. Kernel >= 30% de la memoria.
      *   5. Debe quedar al menos 1 posicion de usuario.
+     *   6. Kernel >= minimo para 1 BCP + ListaDeTrabajos.
      *
-     * @return true si todo es valido; false si no (muestra mensaje de error)
+     * NO se exige que quepan todos los maxProcesos.
+     * Los procesos sobrantes van a la ListaDeTrabajos (swap).
      */
     public boolean validar() {
         int tamanoIngresado;
@@ -245,6 +272,16 @@ public class PanelConfigMemoria extends JPanel {
         if (tamanoIngresado - limiteIngresado < POSICIONES_MINIMAS_USUARIO) {
             mostrarError("Debe quedar espacio para al menos " + POSICIONES_MINIMAS_USUARIO
                     + " instruccion(es) en la zona de Usuario.");
+            return false;
+        }
+
+        // === Validacion: al menos 1 BCP debe caber ===
+        int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1, maxArchivos);
+        if (limiteIngresado < kernelMinimoParaUno) {
+            mostrarError("El kernel debe alcanzar al menos para 1 proceso.\n\n"
+                    + "Con " + maxArchivos + " archivos configurados, el minimo es "
+                    + kernelMinimoParaUno + " posiciones (ListaDeTrabajos + 1 BCP + TablaMemoria).\n\n"
+                    + "Los procesos que no quepan iran a la ListaDeTrabajos (swap).");
             return false;
         }
 

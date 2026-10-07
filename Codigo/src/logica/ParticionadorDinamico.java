@@ -16,7 +16,9 @@ import java.util.List;
  *   [1] = inicio    (Integer)
  *   [2] = tamano    (Integer)
  *
- * Como TAMANO_TABLA_MEMORIA = 15, caben 5 bloques (uno por proceso).
+ * El tamano de la TablaMemoria es proporcional a bcpsQueCaben:
+ *   tamanoTablaMemoria = bcpsQueCaben × 3
+ * (un bloque por cada BCP que cabe en el kernel).
  */
 public class ParticionadorDinamico {
 
@@ -99,9 +101,13 @@ public class ParticionadorDinamico {
     /**
      * Registra un bloque en la TablaMemoria.
      * Cada bloque ocupa 3 posiciones: idProceso, inicio, tamaño.
+     *
+     * El tamano de la TablaMemoria es proporcional a bcpsQueCaben
+     * (memoria.getTamanoTablaMemoria() / POSICIONES_POR_BLOQUE bloques).
      */
     private void registrarEnTablaMemoria(int idProceso, int base, int tamano) {
-        int cantidadBloques = Memoria.TAMANO_TABLA_MEMORIA / POSICIONES_POR_BLOQUE;
+        int tamanoTabla = memoria.getTamanoTablaMemoria();
+        int cantidadBloques = tamanoTabla / POSICIONES_POR_BLOQUE;
 
         for (int i = 0; i < cantidadBloques; i++) {
             int posId     = i * POSICIONES_POR_BLOQUE;
@@ -123,7 +129,8 @@ public class ParticionadorDinamico {
      * Elimina el bloque del proceso en la TablaMemoria.
      */
     private void eliminarDeTablaMemoria(int idProceso) {
-        int cantidadBloques = Memoria.TAMANO_TABLA_MEMORIA / POSICIONES_POR_BLOQUE;
+        int tamanoTabla = memoria.getTamanoTablaMemoria();
+        int cantidadBloques = tamanoTabla / POSICIONES_POR_BLOQUE;
 
         for (int i = 0; i < cantidadBloques; i++) {
             int posId = i * POSICIONES_POR_BLOQUE;

@@ -1,5 +1,6 @@
 package config;
 
+import modelo.BCP;
 import modelo.Memoria;
 
 import java.io.File;
@@ -14,58 +15,28 @@ import java.util.Properties;
  * Lee y escribe los parametros del sistema desde un archivo de texto
  * (config.txt) con formato "clave=valor".
  *
- * Parametros (DEFAULTS DEL PROFESOR):
- *   - memoria: tamano total de la memoria principal. DEFAULT: 256 (profesor).
- *   - kernel: limite kernel/usuario. Minimo 30% de memoria.
- *   - disco: tamano total del disco. DEFAULT: 512 (profesor).
- *   - max_archivos: cantidad maxima de archivos en el indice. DEFAULT: 10.
- *   - memoria_virtual: tamano del swap. DEFAULT: 64 (profesor).
- *   - max_procesos: cantidad maxima de procesos. DEFAULT: 5 (profesor).
+ * Parametros CONFIGURABLES:
+ *   - memoria, kernel, disco, max_archivos, memoria_virtual.
  *
- * POLITICA:
- *   1. Se aplica SIEMPRE el minimo del 30% para el kernel.
- *   2. Los BCPs que NO quepan en el kernel no son un error: los procesos
- *      sobrantes esperan en la ListaDeTrabajos (disco), segun el enunciado:
- *      "En el caso de que no exista espacio para almacenar un proceso en
- *       memoria principal, este debe esperar hasta que sea liberado."
+ * Parametros FIJOS:
+ *   - max_procesos = 5.
  */
 public class ConfiguracionExterna {
 
     public static final String ARCHIVO = "config.txt";
-
-    /** Porcentaje minimo del kernel respecto a la memoria total. */
     public static final double PORCENTAJE_MINIMO_KERNEL = 0.30;
 
-    /* ==================== VALORES POR DEFECTO (PROFESOR) ==================== */
-
-    /** Default indicado por el profesor: 256. */
     public static final int MEMORIA_DEFAULT = 256;
-
-    /** Kernel por defecto: 30% de la memoria default (256). */
-    public static final int KERNEL_DEFAULT = (int) Math.ceil(256 * PORCENTAJE_MINIMO_KERNEL); // 77
-
-    /** Default indicado por el profesor: 512. */
+    public static final int KERNEL_DEFAULT = (int) Math.ceil(256 * PORCENTAJE_MINIMO_KERNEL);
     public static final int DISCO_DEFAULT = 512;
-
-    /** Default indicado por el profesor: 10. */
     public static final int MAX_ARCHIVOS_DEFAULT = 10;
-
-    /** Default indicado por el profesor: 64. */
     public static final int MEMORIA_VIRTUAL_DEFAULT = 64;
 
-    /** Default indicado por el profesor: 5. */
-    public static final int MAX_PROCESOS_DEFAULT = 5;
+    public static final int MAX_PROCESOS = 5;
 
-    /* ==================== RESTRICCIONES ==================== */
-
-    /** Minimo absoluto de memoria. */
     public static final int MEMORIA_MINIMO = 128;
-
     public static final int MEMORIA_MAXIMO = 65536;
-
-    /** 1 posicion por instruccion (coherente con Memoria). */
     public static final int POSICIONES_POR_INSTRUCCION = 1;
-
     public static final int DISCO_MINIMO = 128;
     public static final int DISCO_MAXIMO = 65536;
     public static final int MAX_ARCHIVOS_MINIMO = 1;
@@ -74,17 +45,11 @@ public class ConfiguracionExterna {
     public static final int MEMORIA_VIRTUAL_MAXIMO = 65536;
     public static final int ESPACIO_ARCHIVOS_MINIMO = 64;
 
-    public static final int MAX_PROCESOS_MINIMO = 1;
-    public static final int MAX_PROCESOS_MAXIMO = 10;
-
-    /* ==================== VALORES ACTUALES ==================== */
-
     private int memoria         = MEMORIA_DEFAULT;
     private int kernel          = KERNEL_DEFAULT;
     private int disco           = DISCO_DEFAULT;
     private int maxArchivos     = MAX_ARCHIVOS_DEFAULT;
     private int memoriaVirtual  = MEMORIA_VIRTUAL_DEFAULT;
-    private int maxProcesos     = MAX_PROCESOS_DEFAULT;
 
     private boolean huboCorrecciones = false;
     private final StringBuilder mensajesCorrecciones = new StringBuilder();
@@ -110,17 +75,15 @@ public class ConfiguracionExterna {
             disco          = parsear(props, "disco",          disco);
             maxArchivos    = parsear(props, "max_archivos",   maxArchivos);
             memoriaVirtual = parsear(props, "memoria_virtual", memoriaVirtual);
-            maxProcesos    = parsear(props, "max_procesos",   maxProcesos);
 
             validarYCorregir();
 
             System.out.println("[CONFIG] Configuracion cargada desde " + ARCHIVO);
-            System.out.println("[CONFIG]   Memoria: " + memoria
-                    + ", Kernel: " + kernel);
+            System.out.println("[CONFIG]   Memoria: " + memoria + ", Kernel: " + kernel);
             System.out.println("[CONFIG]   Disco: " + disco
-                    + ", MaxArchivos: " + maxArchivos
-                    + ", Swap: " + memoriaVirtual);
-            System.out.println("[CONFIG]   MaxProcesos: " + maxProcesos);
+                    + ", MaxArchivos: " + maxArchivos + ", Swap: " + memoriaVirtual);
+            System.out.println("[CONFIG]   MaxProcesos: " + MAX_PROCESOS
+                    + " (FIJO, no configurable)");
 
         } catch (IOException e) {
             System.err.println("[CONFIG] Error leyendo " + ARCHIVO
@@ -135,19 +98,6 @@ public class ConfiguracionExterna {
         huboCorrecciones = false;
         mensajesCorrecciones.setLength(0);
 
-        // ==== MAX_PROCESOS ====
-        if (maxProcesos < MAX_PROCESOS_MINIMO) {
-            agregarCorreccion("max_procesos=" + maxProcesos
-                    + " invalido (minimo " + MAX_PROCESOS_MINIMO + "). Usando "
-                    + MAX_PROCESOS_DEFAULT + ".");
-            maxProcesos = MAX_PROCESOS_DEFAULT;
-        } else if (maxProcesos > MAX_PROCESOS_MAXIMO) {
-            agregarCorreccion("max_procesos=" + maxProcesos
-                    + " invalido (maximo " + MAX_PROCESOS_MAXIMO + "). Usando "
-                    + MAX_PROCESOS_DEFAULT + ".");
-            maxProcesos = MAX_PROCESOS_DEFAULT;
-        }
-
         // ==== MEMORIA ====
         if (memoria < MEMORIA_MINIMO) {
             agregarCorreccion("memoria=" + memoria
@@ -161,7 +111,7 @@ public class ConfiguracionExterna {
             memoria = MEMORIA_DEFAULT;
         }
 
-        // ==== KERNEL: solo minimo 30% de la memoria ====
+        // ==== KERNEL ====
         int kernelMinimoPorcentaje = (int) Math.ceil(memoria * PORCENTAJE_MINIMO_KERNEL);
 
         if (kernel >= memoria) {
@@ -172,7 +122,7 @@ public class ConfiguracionExterna {
         } else if (kernel < kernelMinimoPorcentaje) {
             agregarCorreccion("kernel=" + kernel
                     + " invalido (minimo " + ((int)(PORCENTAJE_MINIMO_KERNEL*100))
-                    + "% de memoria=" + memoria + " → " + kernelMinimoPorcentaje
+                    + "% de memoria=" + memoria + " -> " + kernelMinimoPorcentaje
                     + "). Usando " + kernelMinimoPorcentaje + ".");
             kernel = kernelMinimoPorcentaje;
         } else if (memoria - kernel < POSICIONES_POR_INSTRUCCION) {
@@ -182,20 +132,14 @@ public class ConfiguracionExterna {
             kernel = memoria - POSICIONES_POR_INSTRUCCION;
         }
 
-        // NO se valida contra getTamanoKernelMinimo(maxProcesos).
-        // Si no caben todos los BCPs, los procesos sobrantes esperan en
-        // la ListaDeTrabajos (disco). Es el comportamiento normal.
-
         // ==== DISCO ====
         if (disco < DISCO_MINIMO) {
             agregarCorreccion("disco=" + disco
-                    + " invalido (minimo " + DISCO_MINIMO + "). Usando "
-                    + DISCO_DEFAULT + ".");
+                    + " invalido (minimo " + DISCO_MINIMO + "). Usando " + DISCO_DEFAULT + ".");
             disco = DISCO_DEFAULT;
         } else if (disco > DISCO_MAXIMO) {
             agregarCorreccion("disco=" + disco
-                    + " invalido (maximo " + DISCO_MAXIMO + "). Usando "
-                    + DISCO_DEFAULT + ".");
+                    + " invalido (maximo " + DISCO_MAXIMO + "). Usando " + DISCO_DEFAULT + ".");
             disco = DISCO_DEFAULT;
         }
 
@@ -225,14 +169,39 @@ public class ConfiguracionExterna {
             memoriaVirtual = MEMORIA_VIRTUAL_DEFAULT;
         }
 
+        // ==== VALIDACION CRUZADA: kernel vs maxArchivos ====
+        int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1, maxArchivos);
+        if (kernel < kernelMinimoParaUno) {
+            int espacioParaLista = kernel
+                    - BCP.POSICIONES_REQUERIDAS
+                    - Memoria.POSICIONES_POR_BLOQUE_TABLA_MEMORIA;
+            int maxArchivosPosibles = espacioParaLista
+                    / Memoria.POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
+
+            if (maxArchivosPosibles < MAX_ARCHIVOS_MINIMO) {
+                int kernelMinimoReal = Memoria.getTamanoKernelMinimo(1, MAX_ARCHIVOS_MINIMO);
+                agregarCorreccion("kernel=" + kernel
+                        + " no alcanza ni para 1 BCP con max_archivos=" + maxArchivos
+                        + ". Ajustando kernel a " + kernelMinimoReal + ".");
+                kernel = kernelMinimoReal;
+            } else {
+                agregarCorreccion("kernel=" + kernel
+                        + " no alcanza para max_archivos=" + maxArchivos
+                        + " + 1 BCP. Reduciendo max_archivos a " + maxArchivosPosibles + ".");
+                maxArchivos = maxArchivosPosibles;
+            }
+        }
+
         // ==== VALIDACION CRUZADA: espacio del disco ====
-        int espacioIndice = maxArchivos * 3;
+        int espacioIndiceAsm = maxArchivos * 4;
+        int espacioIndiceProceso = maxArchivos * 4;
+        int espacioIndice = espacioIndiceAsm + espacioIndiceProceso;
         int espacioOcupado = espacioIndice + memoriaVirtual;
         int espacioArchivos = disco - espacioOcupado;
 
         if (espacioArchivos < ESPACIO_ARCHIVOS_MINIMO) {
             agregarCorreccion("El disco no tiene espacio suficiente: "
-                    + "indice (" + maxArchivos + "x3=" + espacioIndice + ")"
+                    + "indice (" + maxArchivos + "x8=" + espacioIndice + ")"
                     + " + swap (" + memoriaVirtual + ")"
                     + " = " + espacioOcupado
                     + ", deja " + espacioArchivos
@@ -271,7 +240,6 @@ public class ConfiguracionExterna {
         props.setProperty("disco",           String.valueOf(disco));
         props.setProperty("max_archivos",    String.valueOf(maxArchivos));
         props.setProperty("memoria_virtual", String.valueOf(memoriaVirtual));
-        props.setProperty("max_procesos",    String.valueOf(maxProcesos));
 
         try (FileOutputStream out = new FileOutputStream(ARCHIVO)) {
             props.store(out, "Configuracion del Sistema - Proyecto 1 SO");
@@ -303,7 +271,7 @@ public class ConfiguracionExterna {
     public int getDisco()          { return disco; }
     public int getMaxArchivos()    { return maxArchivos; }
     public int getMemoriaVirtual() { return memoriaVirtual; }
-    public int getMaxProcesos()    { return maxProcesos; }
+    public int getMaxProcesos()    { return MAX_PROCESOS; }
 
     public boolean huboCorrecciones() { return huboCorrecciones; }
     public String getMensajesCorrecciones() { return mensajesCorrecciones.toString(); }
@@ -315,7 +283,6 @@ public class ConfiguracionExterna {
     public void setDisco(int v)          { this.disco = v; }
     public void setMaxArchivos(int v)    { this.maxArchivos = v; }
     public void setMemoriaVirtual(int v) { this.memoriaVirtual = v; }
-    public void setMaxProcesos(int v)    { this.maxProcesos = v; }
 
     @Override
     public String toString() {
@@ -325,7 +292,7 @@ public class ConfiguracionExterna {
                 + ", disco=" + disco
                 + ", maxArchivos=" + maxArchivos
                 + ", memoriaVirtual=" + memoriaVirtual
-                + ", maxProcesos=" + maxProcesos
+                + ", maxProcesos=" + MAX_PROCESOS
                 + "}";
     }
 }

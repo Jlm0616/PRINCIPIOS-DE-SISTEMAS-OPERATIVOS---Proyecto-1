@@ -3,6 +3,7 @@ package gui;
 import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.JButton;
+import javax.swing.JOptionPane;
 import javax.swing.JTabbedPane;
 import javax.swing.border.EmptyBorder;
 
@@ -19,6 +20,9 @@ import java.awt.Frame;
  *
  * No crea objetos Memoria ni Disco: solo captura y valida los valores.
  * Quien la usa (VentanaPrincipal) es responsable de aplicarlos.
+ *
+ * IMPORTANTE: maxArchivos se pasa a PanelConfigMemoria porque el kernel
+ * ahora reserva espacio para la ListaDeTrabajos (maxArchivos × 4).
  */
 public class VentanaConfiguracion extends JDialog {
 
@@ -44,7 +48,6 @@ public class VentanaConfiguracion extends JDialog {
      * @param maxArchivosActual    valor inicial de maxArchivos
      * @param tamanoSwapActual     valor inicial de la memoria virtual
      * @param maxProcesosActual    cantidad de procesos configurada
-     *                             (para calcular el kernel minimo real)
      */
     public VentanaConfiguracion(Frame propietario,
                                  int tamanoMemoriaActual,
@@ -75,8 +78,11 @@ public class VentanaConfiguracion extends JDialog {
                                     int maxArchivosActual,
                                     int tamanoSwapActual,
                                     int maxProcesosActual) {
+        // PanelConfigMemoria ahora recibe tambien maxArchivos
         panelMemoria = new PanelConfigMemoria(
-                tamanoMemoriaActual, limiteKernelActual, maxProcesosActual);
+                tamanoMemoriaActual, limiteKernelActual,
+                maxProcesosActual, maxArchivosActual);
+
         panelDisco = new PanelConfigDisco(
                 tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
 
@@ -103,22 +109,51 @@ public class VentanaConfiguracion extends JDialog {
     }
 
     private void validarYConfirmar() {
-        // Validar memoria (incluye la regla del 30%)
+        // Validar memoria (30% + minimo para 1 BCP + ListaDeTrabajos)
         if (!panelMemoria.validar()) {
             tabs.setSelectedComponent(panelMemoria);
             return;
         }
-        // Validar disco (incluye maxArchivos y swap)
+        // Validar disco (maxArchivos y swap)
         if (!panelDisco.validar()) {
+            tabs.setSelectedComponent(panelDisco);
+            return;
+        }
+
+        // === VALIDACION CRUZADA: kernel vs maxArchivos ===
+        int limiteKernel = panelMemoria.getLimiteKernel();
+        int maxArchivos = panelDisco.getMaxArchivos();
+        int kernelMinimo = modelo.Memoria.getTamanoKernelMinimo(1, maxArchivos);
+
+        if (limiteKernel < kernelMinimo) {
+            // Calcular maxArchivos maximo que cabe con este kernel
+            int maxArchivosPosibles = modelo.Memoria.calcularMaxArchivosQueCaben(limiteKernel);
+
+            JOptionPane.showMessageDialog(this,
+                    "Configuracion invalida:\n\n"
+                    + "  Pestana 'Memoria': limite del kernel = " + limiteKernel + "\n"
+                    + "  Pestana 'Disco':   max_archivos      = " + maxArchivos + "\n\n"
+                    + "El kernel (" + limiteKernel + ") no alcanza para "
+                    + maxArchivos + " archivos + 1 proceso.\n"
+                    + "Minimo requerido: " + kernelMinimo + " posiciones.\n\n"
+                    + "Opciones:\n"
+                    + "  1. Aumenta el limite del kernel (pestana 'Memoria')\n"
+                    + "  2. Reduce max_archivos a " + maxArchivosPosibles
+                    + " o menos (pestana 'Disco')\n\n"
+                    + "Se mantiene la configuracion anterior.",
+                    "Datos invalidos",
+                    JOptionPane.ERROR_MESSAGE);
+
+            // Llevar al usuario a la pestana Disco (donde esta maxArchivos)
             tabs.setSelectedComponent(panelDisco);
             return;
         }
 
         // Guardar valores
         tamanoMemoria = panelMemoria.getTamanoMemoria();
-        limiteKernel = panelMemoria.getLimiteKernel();
+        this.limiteKernel = limiteKernel;
         tamanoDisco = panelDisco.getTamanoDisco();
-        maxArchivos = panelDisco.getMaxArchivos();
+        this.maxArchivos = maxArchivos;
         tamanoSwap = panelDisco.getTamanoSwap();
         confirmado = true;
         dispose();

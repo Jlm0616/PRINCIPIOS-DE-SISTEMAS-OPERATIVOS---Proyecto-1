@@ -72,7 +72,6 @@ public class VentanaPrincipal extends JFrame {
 
     private SwingWorker<Integer, Void> workerAutomatico;
 
-    /** Formato de hora para las estadisticas (hora:minuto). */
     private static final DateTimeFormatter FORMATO_HORA =
             DateTimeFormatter.ofPattern("HH:mm");
 
@@ -102,7 +101,6 @@ public class VentanaPrincipal extends JFrame {
         inicializarComponentes();
         refrescarTodo();
 
-        // ==== Mostrar correcciones automaticas ====
         if (config.huboCorrecciones()) {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 JOptionPane.showMessageDialog(this,
@@ -138,14 +136,22 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
+    /**
+     * Inicializa el sistema con la configuracion actual.
+     *
+     * Memoria ahora recibe 4 argumentos: tamanoMemoria, limiteKernel,
+     * maxProcesos, maxArchivos. La ListaProcesos ya NO vive en RAM.
+     * La ListaDeTrabajos SI vive en RAM.
+     */
     private void inicializarSistema() {
         try {
-            memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual, maxProcesosActual);
+            memoria = new Memoria(tamanoMemoriaActual, limiteKernelActual,
+                                  maxProcesosActual, maxArchivosActual);
             cpu = new CPU(limiteKernelActual);
             disco = new Disco(tamanoDiscoActual, maxArchivosActual, tamanoSwapActual);
 
-            listaProcesos = new ListaProcesos(memoria);
-            listaDeTrabajos = new ListaDeTrabajos();
+            listaProcesos = new ListaProcesos();              // ← sin memoria
+            listaDeTrabajos = new ListaDeTrabajos(memoria);    // ← con memoria
 
             particionador = new ParticionadorDinamico(
                     memoria,
@@ -156,13 +162,13 @@ public class VentanaPrincipal extends JFrame {
                                         listaProcesos, listaDeTrabajos,
                                         particionador, disco);
         } catch (IllegalArgumentException e) {
-            int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1);
+            int kernelMinimoParaUno = Memoria.getTamanoKernelMinimo(1, maxArchivosActual);
 
             JOptionPane.showMessageDialog(this,
                     "No se puede inicializar el sistema:\n\n"
                     + e.getMessage() + "\n\n"
                     + "El kernel debe ser al menos " + kernelMinimoParaUno
-                    + " posiciones para 1 proceso.\n"
+                    + " posiciones para 1 proceso + " + maxArchivosActual + " archivos.\n"
                     + "Con memoria=" + tamanoMemoriaActual
                     + " y kernel=" + limiteKernelActual
                     + " no alcanza.\n\n"
@@ -342,21 +348,13 @@ public class VentanaPrincipal extends JFrame {
             return 0;
         }
 
+        // El GestorProcesos ya registra el .asm en el indice ASM internamente.
         ResultadoCarga resultado = gestor.cargarPrograma(archivo);
 
         switch (resultado.getEstado()) {
             case EXITO:
                 panelPantalla.agregarMensaje(">> Cargado: " + archivo.getName()
                         + " (ID=" + resultado.getBcp().getId() + ")");
-
-                try {
-                    String contenidoAsm = new String(
-                            java.nio.file.Files.readAllBytes(archivo.toPath()));
-                    guardarAsmEnDisco(archivo.getName(), contenidoAsm);
-                } catch (Exception ex) {
-                    panelPantalla.agregarMensaje(">> [ADVERTENCIA] No se pudo guardar el .asm: "
-                            + ex.getMessage());
-                }
                 return 1;
 
             case ERROR:
@@ -373,64 +371,6 @@ public class VentanaPrincipal extends JFrame {
         }
 
         return 0;
-    }
-
-    private void guardarAsmEnDisco(String nombre, String contenido) {
-        // Si ya existe: no duplicar
-        if (disco.existe(nombre)) {
-            panelPantalla.agregarMensaje(">> " + nombre
-                    + " ya está en disco (no se duplica)");
-            return;
-        }
-
-        String[] lineas = contenido.split("\\R");
-        int cantidadLineas = 0;
-        for (String linea : lineas) {
-            if (!linea.trim().isEmpty()) cantidadLineas++;
-        }
-
-        // Validacion 1: indice lleno
-        if (disco.getCantidadArchivos() >= disco.getMaxArchivos()) {
-            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
-                    + ": el índice de archivos está lleno ("
-                    + disco.getCantidadArchivos() + "/" + disco.getMaxArchivos() + ")");
-            return;
-        }
-
-        // Validacion 2: sin espacio en zona de archivos
-        if (disco.getEspacioArchivosLibre() < cantidadLineas) {
-            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
-                    + ": sin espacio en la zona de archivos (necesario "
-                    + cantidadLineas + " posiciones, libre "
-                    + disco.getEspacioArchivosLibre() + ")");
-            return;
-        }
-
-        int inicio = disco.reservarBloqueArchivo(cantidadLineas);
-        if (inicio == -1) {
-            panelPantalla.agregarMensaje(">> [ERROR] No se puede guardar " + nombre
-                    + ": no hay bloque contiguo de " + cantidadLineas + " posiciones");
-            return;
-        }
-
-        int i = 0;
-        for (String linea : lineas) {
-            if (linea.trim().isEmpty()) continue;
-            disco.escribir(inicio + i, linea.trim());
-            i++;
-        }
-        int fin = inicio + cantidadLineas - 1;
-
-        boolean registrado = disco.registrarArchivo(nombre, inicio, fin);
-        if (!registrado) {
-            disco.liberarBloqueArchivo(inicio, cantidadLineas);
-            panelPantalla.agregarMensaje(">> [ERROR] No se pudo registrar " + nombre
-                    + " en el índice. Bloque liberado.");
-            return;
-        }
-
-        panelPantalla.agregarMensaje(">> Guardado en disco: " + nombre
-                + " (" + cantidadLineas + " posiciones en [" + inicio + ".." + fin + "])");
     }
 
     private void ejecutarUnPaso() {
@@ -518,6 +458,14 @@ public class VentanaPrincipal extends JFrame {
             return;
         }
 
+        // Guardar config actual para poder revertir si falla
+        int viejoTamano = this.tamanoMemoriaActual;
+        int viejoKernel = this.limiteKernelActual;
+        int viejoDisco = this.tamanoDiscoActual;
+        int viejoMaxArchivos = this.maxArchivosActual;
+        int viejoSwap = this.tamanoSwapActual;
+        int viejoMaxProcesos = this.maxProcesosActual;
+
         VentanaConfiguracion dialogo = new VentanaConfiguracion(
                 this,
                 tamanoMemoriaActual,
@@ -537,12 +485,36 @@ public class VentanaPrincipal extends JFrame {
         int nuevoMaxArchivos = dialogo.getMaxArchivos();
         int nuevoSwap   = dialogo.getTamanoSwap();
 
+        // Aplicar temporalmente
         this.tamanoMemoriaActual = nuevoTamano;
         this.limiteKernelActual = nuevoKernel;
         this.tamanoDiscoActual = nuevoDisco;
         this.maxArchivosActual = nuevoMaxArchivos;
         this.tamanoSwapActual = nuevoSwap;
 
+        // Intentar inicializar (valida la config)
+        try {
+            inicializarSistema();
+        } catch (IllegalArgumentException e) {
+            // Revertir a la config anterior
+            this.tamanoMemoriaActual = viejoTamano;
+            this.limiteKernelActual = viejoKernel;
+            this.tamanoDiscoActual = viejoDisco;
+            this.maxArchivosActual = viejoMaxArchivos;
+            this.tamanoSwapActual = viejoSwap;
+            this.maxProcesosActual = viejoMaxProcesos;
+
+            // NO guardar en config.txt
+            JOptionPane.showMessageDialog(this,
+                    "La configuracion no es valida:\n\n"
+                    + e.getMessage() + "\n\n"
+                    + "Se mantiene la configuracion anterior.",
+                    "Error de configuracion",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Solo si inicializo bien: guardar en config.txt
         config.setMemoria(nuevoTamano);
         config.setKernel(nuevoKernel);
         config.setDisco(nuevoDisco);
@@ -550,12 +522,9 @@ public class VentanaPrincipal extends JFrame {
         config.setMemoriaVirtual(nuevoSwap);
         config.guardar();
 
-        inicializarSistema();
         configurarCallbacks();
-
         panelPantalla.limpiar();
         mostrarMensajeConfiguracion();
-
         refrescarTodo();
     }
 
@@ -575,10 +544,15 @@ public class VentanaPrincipal extends JFrame {
         panelPantalla.agregarMensaje(">>   BCPs disponibles en kernel: "
                 + memoria.getBcpsQueCaben()
                 + " (configurados: " + maxProcesosActual + ")");
+        panelPantalla.agregarMensaje(">>   ListaDeTrabajos en RAM: "
+                + memoria.getTamanoListaTrabajos() + " posiciones ("
+                + maxArchivosActual + " entradas)");
         panelPantalla.agregarMensaje(">>   Disco: " + tamanoDiscoActual
                 + " posiciones (maxArchivos=" + maxArchivosActual
                 + ", swap=" + tamanoSwapActual + ")");
-        panelPantalla.agregarMensaje(">>     Indice: " + disco.getInicioIndice()
+        panelPantalla.agregarMensaje(">>     Indice ASM: " + disco.getInicioIndiceAsm()
+                + "-" + (disco.getInicioIndiceProceso() - 1));
+        panelPantalla.agregarMensaje(">>     Indice PROCESO: " + disco.getInicioIndiceProceso()
                 + "-" + (disco.getInicioSwap() - 1));
         panelPantalla.agregarMensaje(">>     Swap: " + disco.getInicioSwap()
                 + "-" + (disco.getInicioArchivos() - 1));

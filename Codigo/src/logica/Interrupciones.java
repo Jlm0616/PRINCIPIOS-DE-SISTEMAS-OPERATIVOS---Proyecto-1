@@ -22,6 +22,11 @@ import java.util.function.Consumer;
  *        Ejemplo: MOV DX, "datos.txt"
  *   AL = resultado (0 exito, 1 error, o contenido leido).
  *
+ * IMPORTANTE: todos los archivos creados por procesos (INT 21H) van al
+ * INDICE PROCESO del disco, NO al indice ASM. Esto evita conflictos
+ * entre los .asm cargados por el usuario y los archivos creados por
+ * los procesos en ejecucion.
+ *
  * Al abrir un archivo, su nombre se agrega a las 5 posiciones de
  * archivos abiertos del BCP (Stallings, Tabla 3.5: "Resource Ownership
  * and Utilization: opened files").
@@ -68,7 +73,7 @@ public class Interrupciones {
      * DX puede ser un numero o un string.
      */
     private ResultadoInterrupcion ejecutarImprimirPantalla(BCP bcp) {
-        String mensaje = "[PANTALLA] DX = " + bcp.getDx();   // ← DX es String
+        String mensaje = "[PANTALLA] DX = " + bcp.getDx();
         if (salidaPantalla != null) {
             salidaPantalla.accept(mensaje);
         }
@@ -86,7 +91,7 @@ public class Interrupciones {
      * INT 21H: manejo de archivos.
      *
      * DX contiene el nombre del archivo como String.
-     * Si el nombre no tiene extension, se agrega ".txt" por defecto.
+     * Todos los archivos creados por procesos van al INDICE PROCESO.
      */
     private ResultadoInterrupcion ejecutarManejoArchivos(BCP bcp) {
         if (solicitudArchivo != null) {
@@ -94,7 +99,7 @@ public class Interrupciones {
         }
 
         int ah = bcp.getAh();
-        String nombre = bcp.getDx();   // ← CAMBIO: DX es String directo
+        String nombre = bcp.getDx();
 
         // Validacion: nombre vacio
         if (nombre == null || nombre.isEmpty()) {
@@ -112,7 +117,7 @@ public class Interrupciones {
             }
 
             case 0x3D: {  // abrir archivo
-                if (!disco.existe(nombre)) {
+                if (!existeArchivoProceso(nombre)) {
                     bcp.setAl(1);   // archivo no existe
                     System.out.println("[DISCO] abrir(\"" + nombre + "\") = NO EXISTE");
                     break;
@@ -122,7 +127,7 @@ public class Interrupciones {
                     bcp.setAl(0);
                     System.out.println("[DISCO] abrir(\"" + nombre + "\") = OK");
                 } else {
-                    bcp.setAl(1);   // demasiados archivos abiertos
+                    bcp.setAl(1);
                     System.out.println("[DISCO] abrir(\"" + nombre + "\") = ERROR (max "
                             + BCP.TAMANO_MAXIMO_ARCHIVOS + " archivos abiertos)");
                 }
@@ -150,7 +155,6 @@ public class Interrupciones {
             }
 
             case 0x41: {  // eliminar archivo
-                // Cerrar primero si estaba abierto
                 bcp.cerrarArchivo(nombre);
 
                 boolean eliminado = eliminarArchivoDeDisco(nombre);
@@ -171,22 +175,32 @@ public class Interrupciones {
 
     /* ==================== HELPERS DE ARCHIVOS ==================== */
 
+    /**
+     * Verifica si un archivo creado por un proceso existe en el INDICE PROCESO.
+     */
+    private boolean existeArchivoProceso(String nombre) {
+        return disco.existe(nombre, Disco.TIPO_PROCESO);
+    }
+
+    /**
+     * Crea un archivo en el INDICE PROCESO (no en el indice ASM).
+     */
     private boolean crearArchivoEnDisco(String nombre) {
-        if (disco.existe(nombre)) return false;
+        if (existeArchivoProceso(nombre)) return false;
 
         int inicio = disco.reservarBloqueArchivo(1);
         if (inicio == -1) return false;
 
         disco.escribir(inicio, "");
 
-        return disco.registrarArchivo(nombre, inicio, inicio);
+        return disco.registrarArchivoProceso(nombre, inicio, inicio, Disco.ZONA_PRINCIPAL);
     }
 
     private String leerArchivoDeDisco(String nombre) {
-        if (!disco.existe(nombre)) return null;
+        if (!existeArchivoProceso(nombre)) return null;
 
-        int inicio = disco.getInicioArchivo(nombre);
-        int fin = disco.getFinArchivo(nombre);
+        int inicio = disco.getInicioArchivo(nombre, Disco.TIPO_PROCESO);
+        int fin = disco.getFinArchivo(nombre, Disco.TIPO_PROCESO);
         if (inicio == -1 || fin == -1) return null;
 
         StringBuilder sb = new StringBuilder();
@@ -198,11 +212,11 @@ public class Interrupciones {
     }
 
     private boolean escribirArchivoEnDisco(String nombre, String contenido) {
-        if (!disco.existe(nombre)) return false;
+        if (!existeArchivoProceso(nombre)) return false;
         if (contenido == null) return false;
 
-        int inicioViejo = disco.getInicioArchivo(nombre);
-        int finViejo = disco.getFinArchivo(nombre);
+        int inicioViejo = disco.getInicioArchivo(nombre, Disco.TIPO_PROCESO);
+        int finViejo = disco.getFinArchivo(nombre, Disco.TIPO_PROCESO);
         int tamanoViejo = (finViejo - inicioViejo) + 1;
 
         if (contenido.length() <= tamanoViejo) {
@@ -224,21 +238,23 @@ public class Interrupciones {
 
         disco.liberarBloqueArchivo(inicioViejo, tamanoViejo);
 
-        disco.eliminarDelIndice(nombre);
-        return disco.registrarArchivo(nombre, nuevoInicio, nuevoInicio + contenido.length() - 1);
+        disco.eliminarDelIndice(nombre, Disco.TIPO_PROCESO);
+        return disco.registrarArchivoProceso(
+                nombre, nuevoInicio, nuevoInicio + contenido.length() - 1,
+                Disco.ZONA_PRINCIPAL);
     }
 
     private boolean eliminarArchivoDeDisco(String nombre) {
-        if (!disco.existe(nombre)) return false;
+        if (!existeArchivoProceso(nombre)) return false;
 
-        int inicio = disco.getInicioArchivo(nombre);
-        int fin = disco.getFinArchivo(nombre);
+        int inicio = disco.getInicioArchivo(nombre, Disco.TIPO_PROCESO);
+        int fin = disco.getFinArchivo(nombre, Disco.TIPO_PROCESO);
         if (inicio == -1 || fin == -1) return false;
 
         int tamano = (fin - inicio) + 1;
 
         disco.liberarBloqueArchivo(inicio, tamano);
-        disco.eliminarDelIndice(nombre);
+        disco.eliminarDelIndice(nombre, Disco.TIPO_PROCESO);
 
         return true;
     }

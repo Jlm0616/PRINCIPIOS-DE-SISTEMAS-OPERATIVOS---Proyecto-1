@@ -15,27 +15,22 @@ import java.util.List;
  * Fachada de orquestación del ciclo de vida y ejecución de procesos.
  *
  * Modelo de listas (segun el profe):
- *   - ListaProcesos: procesos en RAM (READY, RUNNING, BLOCKED).
- *   - ListaDeTrabajos: procesos en disco (NEW).
+ *   - ListaProcesos: cola FCFS en Java (solo para el planificador).
+ *   - ListaDeTrabajos: procesos que esperan entrar a RAM (en RAM, apunta al disco).
  *
  * Zonas de la Memoria (Stallings, seccion 3.3):
- *   - ListaProcesos: direcciones de BCPs READY.
- *   - BCPs: 5 × 26 posiciones.
- *   - TablaMemoria: bloques asignados.
- *   - TablaArchivos: archivos abiertos.
+ *   - ListaDeTrabajos: info de .asm que esperan entrar a RAM.
+ *   - BCPs: bcpsQueCaben × 30 posiciones.
+ *   - TablaMemoria: bcpsQueCaben × 3 posiciones.
  *
- * FCFS puro no apropiativo estricto:
- *   - Si un proceso se bloquea por INT 09H, la CPU queda idle.
- *   - Si un proceso se bloquea por INT 21H, se simula una tardanza.
+ * INDICE DEL DISCO: tiene 2 secciones:
+ *   - Indice ASM: archivos .asm cargados.
+ *   - Indice PROCESO: archivos creados por procesos (datos.txt).
+ * Cada entrada ocupa 4 posiciones: [nombre, inicio, fin, zona].
  *
- * NOTA: DX es un String (nombre de archivo para INT 21H).
- * Para operaciones con valores numericos (como INT 09H), se usa setDxAsInt().
- *
- * INDICE DEL DISCO: tiene 4 posiciones por archivo [nombre, inicio, fin, zona].
- * La zona puede ser:
- *   - ZONA_PRINCIPAL → el .asm está en la zona de archivos (94-511).
- *   - ZONA_VIRTUAL   → el .asm está en la zona de swap (30-93).
- * Cuando un proceso pasa de swap a RAM, se copia a archivos y se actualiza el índice.
+ * IMPORTANTE: cuando un .asm entra a RAM, sus instrucciones se copian
+ * TAMBIEN a la zona de archivos del disco (para que el indice ASM
+ * apunte a la zona de archivos, no a RAM).
  */
 public class GestorProcesos {
 
@@ -97,16 +92,20 @@ public class GestorProcesos {
         int id = siguienteId;
         String nombreArchivo = archivo.getName();
 
+        // 1. Intentar entrar a RAM
         int base = particionador.asignarParticion(tamanoNecesario, id);
         if (base != -1) {
             BCP bcp = crearProcesoEnParticion(instrucciones, base, id);
             if (bcp != null) {
+                // Copiar el .asm a la zona de archivos del disco y registrar en indice ASM
+                copiarAsmAArchivosYRegistrar(nombreArchivo, instrucciones);
                 siguienteId++;
                 return ResultadoCarga.exito(bcp);
             }
             particionador.liberarParticion(base, tamanoNecesario, id);
         }
 
+        // 2. Si no cabe, va a swap
         ResultadoCarga resultadoSwap = suspenderEnSwap(instrucciones, id, nombreArchivo);
         if (resultadoSwap.getEstado() == ResultadoCarga.Estado.EN_ESPERA) {
             siguienteId++;
@@ -120,14 +119,61 @@ public class GestorProcesos {
     }
 
     /**
-     * Suspende un proceso en swap y lo registra en el índice del disco
-     * con la zona VIRTUAL.
+     * Copia las instrucciones de un .asm a la zona de archivos del disco
+     * y lo registra en el indice ASM con zona PRINCIPAL.
+     *
+     * Si el .asm ya existe en el indice, solo actualiza su zona (no lo duplica).
+     */
+    private void copiarAsmAArchivosYRegistrar(String nombreArchivo,
+                                              List<Instruccion> instrucciones) {
+        int tamano = instrucciones.size();
+
+        // Si ya existe en el indice ASM: solo actualizar zona a PRINCIPAL
+        if (disco.existe(nombreArchivo, Disco.TIPO_ASM)) {
+            int inicio = disco.getInicioArchivo(nombreArchivo, Disco.TIPO_ASM);
+            int fin = disco.getFinArchivo(nombreArchivo, Disco.TIPO_ASM);
+            disco.actualizarZona(nombreArchivo, Disco.TIPO_ASM,
+                    Disco.ZONA_PRINCIPAL, inicio, fin);
+            return;
+        }
+
+        // Reservar espacio en la zona de archivos
+        int inicio = disco.reservarBloqueArchivo(tamano);
+        if (inicio == -1) {
+            System.out.println("[WARNING] Sin espacio en zona de archivos para "
+                    + nombreArchivo + ". El .asm solo estara en RAM.");
+            return;
+        }
+
+        // Copiar instrucciones a la zona de archivos
+        Object[] instruccionesArr = instrucciones.toArray();
+        disco.escribirBloqueArchivo(inicio, instruccionesArr);
+        int fin = inicio + tamano - 1;
+
+        // Registrar en el indice ASM con zona PRINCIPAL
+        boolean ok = disco.registrarArchivoAsm(nombreArchivo, inicio, fin,
+                Disco.ZONA_PRINCIPAL);
+        if (!ok) {
+            disco.liberarBloqueArchivo(inicio, tamano);
+            System.out.println("[WARNING] No se pudo registrar " + nombreArchivo
+                    + " en el indice ASM (lleno).");
+            return;
+        }
+
+        System.out.println("[DISCO] .asm guardado en zona archivos: " + nombreArchivo
+                + " (" + inicio + "-" + fin + ")");
+    }
+
+    /**
+     * Suspende un proceso en swap y lo registra en el indice ASM del disco
+     * con la zona VIRTUAL y en la ListaDeTrabajos (en RAM).
      */
     private ResultadoCarga suspenderEnSwap(List<Instruccion> instrucciones,
                                            int id,
                                            String nombreArchivo) {
         int tamanoInstrucciones = instrucciones.size();
 
+        // 1. Verificar espacio en swap
         if (disco.getEspacioSwapLibre() < tamanoInstrucciones) {
             return ResultadoCarga.error(
                 "La memoria virtual del disco no tiene espacio.\n"
@@ -143,21 +189,31 @@ public class GestorProcesos {
         Object[] instruccionesArr = instrucciones.toArray();
         disco.escribirBloqueSwap(dirSwap, instruccionesArr);
 
-        // Registrar en el índice del disco con zona VIRTUAL
+        // 2. Registrar en el indice ASM del disco con zona VIRTUAL
         int finSwap = dirSwap + tamanoInstrucciones - 1;
-        boolean registrado = disco.registrarArchivo(
+        boolean registrado = disco.registrarArchivoAsm(
                 nombreArchivo, dirSwap, finSwap, Disco.ZONA_VIRTUAL);
         if (!registrado) {
             disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
             return ResultadoCarga.error(
-                "No se pudo registrar el archivo en el índice del disco (lleno).");
+                "No se pudo registrar el archivo en el indice ASM (lleno).");
         }
 
+        // 3. Agregar a la ListaDeTrabajos (en RAM)
+        boolean agregado = listaDeTrabajos.agregar(
+                nombreArchivo, dirSwap, finSwap, Disco.ZONA_VIRTUAL);
+        if (!agregado) {
+            disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
+            disco.eliminarDelIndice(nombreArchivo, Disco.TIPO_ASM);
+            return ResultadoCarga.error(
+                "La ListaDeTrabajos esta llena. No se puede suspender el proceso.");
+        }
+
+        // 4. Guardar metadatos del proceso suspendido (por si se necesitan)
         ProcesoEnEspera pe = new ProcesoEnEspera(
                 id, EstadoProceso.NEW, tamanoInstrucciones);
         pe.setDireccionBaseEnSwap(dirSwap);
         pe.setNombreArchivo(nombreArchivo);
-        listaDeTrabajos.agregar(pe);
 
         System.out.println("[SWAP] Proceso " + id
                 + " (" + nombreArchivo + ") en NEW (lista de trabajos, dir swap=" + dirSwap
@@ -184,7 +240,7 @@ public class GestorProcesos {
             return true;
         }
 
-        // 2. Si el proceso actual está BLOCKED por INT 21H, decrementar tardanza.
+        // 2. Si el proceso actual esta BLOCKED por INT 21H, decrementar tardanza.
         if (despachador.getEjecutorActual() != null) {
             BCP actualBloqueado = despachador.getBcpActual();
             if (actualBloqueado != null
@@ -359,23 +415,18 @@ public class GestorProcesos {
 
     /**
      * Reactiva el siguiente proceso de la ListaDeTrabajos.
-     *
-     * Pasos:
-     *   1. Buscar el proceso en swap.
-     *   2. Asignar partición + BCP.
-     *   3. Copiar las instrucciones de swap a RAM.
-     *   4. Copiar las instrucciones a la zona de archivos del disco.
-     *   5. Actualizar el índice: VIRTUAL → PRINCIPAL, con las nuevas posiciones.
-     *   6. Liberar el bloque de swap.
-     *   7. Agregar el proceso a ListaProcesos.
      */
     private void reactivarSiguienteProceso() {
         if (listaDeTrabajos.estaVacia()) return;
 
-        ProcesoEnEspera pe = listaDeTrabajos.verPrimero();
-        int tamanoInstrucciones = pe.getTamanoEnSwap();
-        int id = pe.getId();
-        String nombreArchivo = pe.getNombreArchivo();
+        Object[] trabajo = listaDeTrabajos.verPrimero();
+        if (trabajo == null) return;
+
+        String nombreArchivo = (String) trabajo[0];
+        int inicioSwap = (Integer) trabajo[1];
+        int finSwap = (Integer) trabajo[2];
+        int tamanoInstrucciones = (finSwap - inicioSwap) + 1;
+        int id = siguienteId;
 
         int base = particionador.asignarParticion(tamanoInstrucciones, id);
         if (base == -1) return;
@@ -386,8 +437,8 @@ public class GestorProcesos {
             return;
         }
 
-        int dirSwap = pe.getDireccionBaseEnSwap();
-        Object[] instruccionesArr = disco.leerBloqueSwap(dirSwap, tamanoInstrucciones);
+        // Copiar instrucciones de swap a RAM
+        Object[] instruccionesArr = disco.leerBloqueSwap(inicioSwap, tamanoInstrucciones);
 
         List<Instruccion> instrucciones = new ArrayList<>();
         for (Object obj : instruccionesArr) {
@@ -396,27 +447,24 @@ public class GestorProcesos {
             }
         }
 
-        // === COPIAR A ARCHIVOS (si hay espacio) ===
+        // Copiar a archivos (si hay espacio)
         int nuevoInicioArchivos = disco.reservarBloqueArchivo(tamanoInstrucciones);
         if (nuevoInicioArchivos != -1) {
             disco.escribirBloqueArchivo(nuevoInicioArchivos, instruccionesArr);
             int nuevoFinArchivos = nuevoInicioArchivos + tamanoInstrucciones - 1;
 
-            // Actualizar el índice del disco
+            // Actualizar el indice ASM
             if (nombreArchivo != null) {
-                disco.actualizarZona(nombreArchivo, Disco.ZONA_PRINCIPAL,
+                disco.actualizarZona(nombreArchivo, Disco.TIPO_ASM, Disco.ZONA_PRINCIPAL,
                         nuevoInicioArchivos, nuevoFinArchivos);
             }
-        } else {
-            System.out.println("[WARNING] No hay espacio en archivos para copiar "
-                    + nombreArchivo + ". Se mantiene solo en swap.");
         }
 
-        // === LIBERAR SWAP Y LISTA DE TRABAJOS ===
-        disco.liberarBloqueSwap(dirSwap, tamanoInstrucciones);
+        // Liberar swap y sacar de la lista de trabajos
+        disco.liberarBloqueSwap(inicioSwap, tamanoInstrucciones);
         listaDeTrabajos.sacarPrimero();
 
-        // === CREAR BCP Y ADMITIR ===
+        // Crear BCP y admitir en RAM
         BCP bcpRestaurado = new BCP(memoria, direccionBase, id, 1);
         admitirEnParticion(bcpRestaurado, instrucciones, base);
 
@@ -439,12 +487,6 @@ public class GestorProcesos {
         listaProcesos.agregar(bcp);
     }
 
-    /**
-     * Desbloquea el primer proceso esperando input de teclado.
-     *
-     * El valor viene como int (0-255) desde la GUI, y se guarda en DX
-     * como String (convertido con setDxAsInt).
-     */
     public boolean desbloquearProceso(int valor) {
         if (procesosBloqueadosInput.isEmpty()) return false;
 
@@ -460,7 +502,7 @@ public class GestorProcesos {
         return !procesosBloqueadosInput.isEmpty();
     }
 
-    /* ==================== CONSULTAS PARA LA GUI ==================== */
+    /* ================== CONSULTAS PARA LA GUI ================== */
 
     public int getTotalProcesosActivos() {
         return listaProcesos.getCantidad()
@@ -517,14 +559,14 @@ public class GestorProcesos {
         return new ArrayList<>(procesosBloqueadosInput);
     }
 
-    public List<ProcesoEnEspera> getProcesosEnEspera() {
-        return new ArrayList<>(listaDeTrabajos.toList());
+    public List<Object[]> getProcesosEnEspera() {
+        return listaDeTrabajos.toList();
     }
 
     public Disco getDisco() { return disco; }
     public ParticionadorDinamico getParticionador() { return particionador; }
 
-    /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
+    /* ================== CALLBACKS DE INTERRUPCIONES ================== */
 
     public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
         this.salidaPantalla = callback;

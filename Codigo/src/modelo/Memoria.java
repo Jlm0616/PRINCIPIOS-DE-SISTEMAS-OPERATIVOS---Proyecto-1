@@ -1,8 +1,5 @@
 package modelo;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Memoria principal de la maquina virtual (Proyecto 1).
  *
@@ -10,25 +7,30 @@ import java.util.List;
  *   - Zona KERNEL: posiciones [0, limiteKernelUsuario)
  *   - Zona USUARIO: posiciones [limiteKernelUsuario, tamanoMemoria)
  *
- * La zona KERNEL contiene 3 SUB-ZONAS FIJAS (Stallings, seccion 3.3):
+ * La zona KERNEL contiene 3 SUB-ZONAS:
  *
  *   ┌──────────────────────────────────────────────────────┐
  *   │  ZONA KERNEL                                         │
  *   ├──────────────────────────────────────────────────────┤
- *   │  ListaProcesos (Ready queue)                         │
- *   │    → Direcciones de BCPs READY (5 posiciones fijas)  │
+ *   │  ListaDeTrabajos                                     │
+ *   │    → [nombre, inicio, fin, zona] × maxArchivos      │
+ *   │    → Cada entrada ocupa 4 posiciones                 │
  *   ├──────────────────────────────────────────────────────┤
  *   │  BCPs                                                │
  *   │    → bcpsQueCaben × 30 posiciones                    │
  *   ├──────────────────────────────────────────────────────┤
  *   │  TablaMemoria                                        │
- *   │    → Bloques asignados (15 posiciones fijas)         │
+ *   │    → bcpsQueCaben × 3 posiciones (id, inicio, tam)  │
  *   └──────────────────────────────────────────────────────┘
  *
  *   ┌──────────────────────────────────────────────────────┐
  *   │  ZONA USUARIO                                        │
  *   │    → Instrucciones de los procesos activos           │
  *   └──────────────────────────────────────────────────────┘
+ *
+ * La ListaDeTrabajos va PRIMERO en el kernel y apunta a los
+ * indices del disco. Cada entrada guarda la info completa del
+ * trabajo: [nombre, inicio, fin, zona].
  *
  * IMPORTANTE: el numero de BCPs que caben se calcula a partir
  * del tamano del kernel. Si el kernel no alcanza para maxProcesos,
@@ -37,43 +39,43 @@ import java.util.List;
  *
  *   "En el caso de que no exista espacio para almacenar un proceso
  *    en memoria principal, este debe esperar hasta que sea liberado."
- *
- * El limiteKernelUsuario es CONFIGURABLE. Debe ser al menos:
- *   TAMANO_LISTA_PROCESOS + BCP.POSICIONES_REQUERIDAS + TAMANO_TABLA_MEMORIA
- * (es decir, al menos 1 BCP).
  */
 public class Memoria {
 
     /* ==================== TAMANOS FIJOS ==================== */
 
-    public static final int TAMANO_LISTA_PROCESOS = 5;
-    public static final int TAMANO_TABLA_MEMORIA   = 15;
-    public static final int MAX_BCPS               = 5;
+    /** Cantidad maxima de BCPs que pueden caber en el kernel. */
+    public static final int MAX_BCPS = 5;
 
     /** Tamano minimo de la memoria (configurable por el usuario). */
     public static final int TAMANO_MINIMO = 128;
 
+    /** Posiciones por entrada de la ListaDeTrabajos (nombre, inicio, fin, zona). */
+    public static final int POSICIONES_POR_ENTRADA_LISTA_TRABAJOS = 4;
+
+    /** Posiciones por bloque en la TablaMemoria (id, inicio, tamano). */
+    public static final int POSICIONES_POR_BLOQUE_TABLA_MEMORIA = 3;
+
     /* ==================== ZONAS (calculadas) ==================== */
 
-    private final int inicioListaProcesos;
-    private final int finListaProcesos;
+    private final int inicioListaTrabajos;
+    private final int finListaTrabajos;
+    private final int tamanoListaTrabajos;
 
     private final int inicioBCPs;
     private final int finBCPs;
 
     private final int inicioTablaMemoria;
     private final int finTablaMemoria;
+    private final int tamanoTablaMemoria;
 
     private final int limiteKernelUsuario;
 
     /* ==================== DATOS ==================== */
 
     private final int tamanoMemoria;
-
-    /** Cantidad de BCPs configurada por el usuario (tope, no garantia). */
     private final int maxProcesos;
-
-    /** Cantidad de BCPs que REALMENTE caben en el kernel. */
+    private final int maxArchivos;
     private final int bcpsQueCaben;
 
     private final Object[] arregloMemoria;
@@ -83,18 +85,14 @@ public class Memoria {
     /**
      * Crea una memoria con el tamano y limite kernel indicados.
      *
-     * Los BCPs que caben en el kernel se calculan automaticamente segun
-     * el limiteKernelUsuario. Si caben menos que maxProcesos, los procesos
-     * sobrantes iran a la ListaDeTrabajos (disco) y esperaran a que se
-     * libere espacio en RAM. NO se lanza excepcion por este motivo.
-     *
      * @param tamanoMemoria       cantidad total de posiciones (>= TAMANO_MINIMO)
      * @param limiteKernelUsuario primera posicion de la zona usuario
      * @param maxProcesos         cantidad maxima deseada de procesos (tope 5)
-     * @throws IllegalArgumentException solo si el tamano es invalido o
-     *         el kernel no alcanza ni para 1 BCP
+     * @param maxArchivos         cantidad maxima de archivos (para ListaDeTrabajos)
+     * @throws IllegalArgumentException si la configuracion es invalida
      */
-    public Memoria(int tamanoMemoria, int limiteKernelUsuario, int maxProcesos) {
+    public Memoria(int tamanoMemoria, int limiteKernelUsuario,
+                   int maxProcesos, int maxArchivos) {
         if (tamanoMemoria < TAMANO_MINIMO) {
             throw new IllegalArgumentException(
                 "Tamano de memoria menor a " + TAMANO_MINIMO);
@@ -102,42 +100,48 @@ public class Memoria {
         if (maxProcesos < 1) {
             throw new IllegalArgumentException("maxProcesos debe ser al menos 1");
         }
+        if (maxArchivos < 1) {
+            throw new IllegalArgumentException("maxArchivos debe ser al menos 1");
+        }
         if (limiteKernelUsuario > tamanoMemoria) {
             throw new IllegalArgumentException(
                 "El limite kernel/usuario no puede superar el tamano total");
         }
 
         // Cuantos BCPs caben en el kernel configurado
-        int bcpsPosibles = calcularBCPsQueCaben(limiteKernelUsuario);
+        int bcpsPosibles = calcularBCPsQueCaben(limiteKernelUsuario, maxProcesos, maxArchivos);
 
         if (bcpsPosibles < 1) {
             throw new IllegalArgumentException(
                 "El kernel no alcanza ni para 1 BCP.\n"
                 + "  Kernel configurado: " + limiteKernelUsuario + " posiciones.\n"
-                + "  Minimo requerido: " + getTamanoKernelMinimo(1) + " posiciones "
-                + "(ListaProcesos=" + TAMANO_LISTA_PROCESOS
+                + "  Minimo requerido: " + getTamanoKernelMinimo(1, maxArchivos) + " posiciones "
+                + "(ListaDeTrabajos=" + (maxArchivos * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS)
                 + " + 1 BCP=" + BCP.POSICIONES_REQUERIDAS
-                + " + TablaMemoria=" + TAMANO_TABLA_MEMORIA + ").");
+                + " + TablaMemoria=" + POSICIONES_POR_BLOQUE_TABLA_MEMORIA + ").");
         }
 
         this.tamanoMemoria = tamanoMemoria;
         this.limiteKernelUsuario = limiteKernelUsuario;
         this.maxProcesos = maxProcesos;
+        this.maxArchivos = maxArchivos;
         this.bcpsQueCaben = Math.min(bcpsPosibles, maxProcesos);
         this.arregloMemoria = new Object[tamanoMemoria];
 
-        // Dimensionar BCPs con bcpsQueCaben (no con maxProcesos)
+        // Dimensionar zonas
         int tamanoBCPs = bcpsQueCaben * BCP.POSICIONES_REQUERIDAS;
+        this.tamanoTablaMemoria = bcpsQueCaben * POSICIONES_POR_BLOQUE_TABLA_MEMORIA;
+        this.tamanoListaTrabajos = maxArchivos * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
 
-        // Calcular limites de cada zona
-        this.inicioListaProcesos = 0;
-        this.finListaProcesos = inicioListaProcesos + TAMANO_LISTA_PROCESOS - 1;
+        // Calcular limites (ListaDeTrabajos PRIMERO)
+        this.inicioListaTrabajos = 0;
+        this.finListaTrabajos = inicioListaTrabajos + tamanoListaTrabajos - 1;
 
-        this.inicioBCPs = finListaProcesos + 1;
+        this.inicioBCPs = finListaTrabajos + 1;
         this.finBCPs = inicioBCPs + tamanoBCPs - 1;
 
         this.inicioTablaMemoria = finBCPs + 1;
-        this.finTablaMemoria = inicioTablaMemoria + TAMANO_TABLA_MEMORIA - 1;
+        this.finTablaMemoria = inicioTablaMemoria + tamanoTablaMemoria - 1;
 
         // Verificar que la TablaMemoria no se salga del kernel
         if (finTablaMemoria >= limiteKernelUsuario) {
@@ -151,23 +155,38 @@ public class Memoria {
 
     /**
      * Calcula cuantos BCPs caben en un kernel de tamano dado.
+     * Reserva espacio para:
+     *   - ListaDeTrabajos (maxArchivos × 4)
+     *   - BCPs (n × 30)
+     *   - TablaMemoria (n × 3)
      *
      * @param tamanoKernel tamano del kernel configurado
+     * @param maxProcesos  cantidad maxima deseada de procesos
+     * @param maxArchivos  cantidad maxima de archivos
      * @return cantidad de BCPs que caben (0 si no cabe ni 1)
      */
-    public static int calcularBCPsQueCaben(int tamanoKernel) {
-        int espacioParaBCPs = tamanoKernel - TAMANO_LISTA_PROCESOS - TAMANO_TABLA_MEMORIA;
-        if (espacioParaBCPs < BCP.POSICIONES_REQUERIDAS) return 0;
-        return Math.min(espacioParaBCPs / BCP.POSICIONES_REQUERIDAS, MAX_BCPS);
+    public static int calcularBCPsQueCaben(int tamanoKernel, int maxProcesos, int maxArchivos) {
+        int tamanoListaTrabajos = maxArchivos * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
+
+        for (int n = Math.min(maxProcesos, MAX_BCPS); n >= 1; n--) {
+            int tamanoBCPs = n * BCP.POSICIONES_REQUERIDAS;
+            int tamanoTablaMem = n * POSICIONES_POR_BLOQUE_TABLA_MEMORIA;
+            int total = tamanoListaTrabajos + tamanoBCPs + tamanoTablaMem;
+
+            if (total <= tamanoKernel) {
+                return n;
+            }
+        }
+        return 0;
     }
 
     /**
      * @return el tamano minimo del kernel para UNA cantidad dada de BCPs.
      */
-    public static int getTamanoKernelMinimo(int maxProcesos) {
-        return TAMANO_LISTA_PROCESOS
+    public static int getTamanoKernelMinimo(int maxProcesos, int maxArchivos) {
+        return (maxArchivos * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS)
              + (maxProcesos * BCP.POSICIONES_REQUERIDAS)
-             + TAMANO_TABLA_MEMORIA;
+             + (maxProcesos * POSICIONES_POR_BLOQUE_TABLA_MEMORIA);
     }
 
     /* ==================== ACCESO GENERICO ==================== */
@@ -202,35 +221,78 @@ public class Memoria {
         return (BCP) valor;
     }
 
-    /* ==================== ZONA 1: LISTA DE PROCESOS ==================== */
+    /* ==================== ZONA 1: LISTA DE TRABAJOS ==================== */
 
-    public int getInicioListaProcesos() { return inicioListaProcesos; }
-    public int getFinListaProcesos()    { return finListaProcesos; }
-    public int getTamanoListaProcesos() { return TAMANO_LISTA_PROCESOS; }
+    public int getInicioListaTrabajos() { return inicioListaTrabajos; }
+    public int getFinListaTrabajos()    { return finListaTrabajos; }
+    public int getTamanoListaTrabajos() { return tamanoListaTrabajos; }
 
-    public void escribirListaProcesos(int i, Object valor) {
-        if (i < 0 || i >= TAMANO_LISTA_PROCESOS) {
-            throw new IndexOutOfBoundsException("Indice fuera de ListaProcesos: " + i);
+    public int getMaxArchivos() { return maxArchivos; }
+
+    /**
+     * Escribe el valor de un campo de una entrada de la ListaDeTrabajos.
+     *
+     * @param entrada indice de la entrada (0 a maxArchivos-1)
+     * @param campo   0=nombre, 1=inicio, 2=fin, 3=zona
+     * @param valor   valor a escribir
+     */
+    public void escribirListaTrabajos(int entrada, int campo, Object valor) {
+        if (entrada < 0 || entrada >= maxArchivos) {
+            throw new IndexOutOfBoundsException("Entrada fuera de ListaDeTrabajos: " + entrada);
         }
-        arregloMemoria[inicioListaProcesos + i] = valor;
+        if (campo < 0 || campo >= POSICIONES_POR_ENTRADA_LISTA_TRABAJOS) {
+            throw new IndexOutOfBoundsException("Campo invalido: " + campo);
+        }
+        arregloMemoria[inicioListaTrabajos + entrada * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS + campo] = valor;
     }
 
-    public Object leerListaProcesos(int i) {
-        if (i < 0 || i >= TAMANO_LISTA_PROCESOS) {
-            throw new IndexOutOfBoundsException("Indice fuera de ListaProcesos: " + i);
+    /**
+     * Lee el valor de un campo de una entrada de la ListaDeTrabajos.
+     */
+    public Object leerListaTrabajos(int entrada, int campo) {
+        if (entrada < 0 || entrada >= maxArchivos) {
+            throw new IndexOutOfBoundsException("Entrada fuera de ListaDeTrabajos: " + entrada);
         }
-        return arregloMemoria[inicioListaProcesos + i];
+        if (campo < 0 || campo >= POSICIONES_POR_ENTRADA_LISTA_TRABAJOS) {
+            throw new IndexOutOfBoundsException("Campo invalido: " + campo);
+        }
+        return arregloMemoria[inicioListaTrabajos + entrada * POSICIONES_POR_ENTRADA_LISTA_TRABAJOS + campo];
+    }
+
+    /**
+     * Busca la primera entrada libre en la ListaDeTrabajos.
+     * Una entrada se considera libre si su campo 0 (nombre) es null.
+     *
+     * @return el indice de la entrada libre, o -1 si esta llena
+     */
+    public int buscarListaTrabajosLibre() {
+        for (int i = 0; i < maxArchivos; i++) {
+            Object nombre = leerListaTrabajos(i, 0);
+            if (nombre == null) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Cuenta cuantas entradas no vacias hay en la ListaDeTrabajos.
+     */
+    public int contarListaTrabajos() {
+        int contador = 0;
+        for (int i = 0; i < maxArchivos; i++) {
+            if (leerListaTrabajos(i, 0) != null) {
+                contador++;
+            }
+        }
+        return contador;
     }
 
     /* ==================== ZONA 2: BCPs ==================== */
 
     public int getInicioBCPs() { return inicioBCPs; }
     public int getFinBCPs()    { return finBCPs; }
-
-    /** @return cantidad de BCPs configurada por el usuario (tope). */
     public int getMaxProcesos() { return maxProcesos; }
-
-    /** @return cantidad de BCPs que REALMENTE caben en el kernel. */
     public int getBcpsQueCaben() { return bcpsQueCaben; }
 
     public int reservarBloqueBCP() {
@@ -259,16 +321,17 @@ public class Memoria {
 
     public int getInicioTablaMemoria() { return inicioTablaMemoria; }
     public int getFinTablaMemoria()    { return finTablaMemoria; }
+    public int getTamanoTablaMemoria() { return tamanoTablaMemoria; }
 
     public void escribirTablaMemoria(int i, Object valor) {
-        if (i < 0 || i >= TAMANO_TABLA_MEMORIA) {
+        if (i < 0 || i >= tamanoTablaMemoria) {
             throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
         }
         arregloMemoria[inicioTablaMemoria + i] = valor;
     }
 
     public Object leerTablaMemoria(int i) {
-        if (i < 0 || i >= TAMANO_TABLA_MEMORIA) {
+        if (i < 0 || i >= tamanoTablaMemoria) {
             throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
         }
         return arregloMemoria[inicioTablaMemoria + i];
@@ -338,11 +401,30 @@ public class Memoria {
         }
         return libres;
     }
+    
+    /**
+    * Calcula cuantos maxArchivos caben con un kernel dado.
+    *
+    * @param tamanoKernel tamano del kernel
+    * @return cantidad maxima de archivos que caben (>= 1)
+    */
+   public static int calcularMaxArchivosQueCaben(int tamanoKernel) {
+       int espacioParaLista = tamanoKernel
+               - BCP.POSICIONES_REQUERIDAS
+               - POSICIONES_POR_BLOQUE_TABLA_MEMORIA;
+
+       if (espacioParaLista < POSICIONES_POR_ENTRADA_LISTA_TRABAJOS) {
+           return 1;   // minimo 1 archivo
+       }
+
+       return espacioParaLista / POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
+   }
 
     @Override
     public String toString() {
         return "Memoria[" + tamanoMemoria + " pos, kernel=0-" + (limiteKernelUsuario - 1)
                 + ", usuario=" + limiteKernelUsuario + "-" + (tamanoMemoria - 1)
-                + ", BCPs=" + bcpsQueCaben + "/" + maxProcesos + "]";
+                + ", BCPs=" + bcpsQueCaben + "/" + maxProcesos
+                + ", ListaTrab=" + maxArchivos + "]";
     }
 }

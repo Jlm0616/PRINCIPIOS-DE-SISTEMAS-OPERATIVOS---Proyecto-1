@@ -31,16 +31,12 @@ import java.awt.FlowLayout;
  *
  * La columna "Zona" indica a qué sección del kernel/usuario pertenece cada
  * posición (Stallings, seccion 3.3):
- *   - ListaProc  → Lista de Procesos (punteros a BCPs)
+ *   - ListaTrab  → Lista de Trabajos (info de .asm que esperan entrar a RAM)
  *   - BCP        → Bloques de Control de Proceso
  *   - TablaMem   → Tabla de Memoria (bloques asignados)
  *   - Usuario    → Instrucciones de los procesos
  *   - Libre      → espacio del kernel no asignado a ninguna sub-zona
  *   - IR         → posicion actual del Instruction Register (amarillo)
- *
- * Para las posiciones de un BCP, ListaProcesos o TablaMemoria, la columna
- * "Valor" muestra el nombre del campo junto con su valor para facilitar la
- * lectura del estado interno del sistema.
  */
 public class PanelMemoria extends JPanel {
 
@@ -54,13 +50,13 @@ public class PanelMemoria extends JPanel {
     private Memoria memoriaActual;
     private int irActual = -1;
 
-    /* Colores suaves por zona (para diferenciar visualmente) */
-    private static final Color COLOR_LISTA_PROC = new Color(0xE8, 0xF5, 0xE9);  // verde muy claro
-    private static final Color COLOR_BCP        = new Color(0xFF, 0xF8, 0xE1);  // amarillo muy claro
-    private static final Color COLOR_TABLA_MEM  = new Color(0xF3, 0xE5, 0xF5);  // lila muy claro
-    private static final Color COLOR_USUARIO    = Color.WHITE;
-    private static final Color COLOR_LIBRE      = new Color(0xF0, 0xF0, 0xF0);  // gris muy claro
-    private static final Color COLOR_IR         = Paleta.AMARILLO_ADVERTENCIA;
+    /* Colores suaves por zona */
+    private static final Color COLOR_LISTA_TRABAJOS = new Color(0xE3, 0xF2, 0xFD);  // azul muy claro
+    private static final Color COLOR_BCP            = new Color(0xFF, 0xF8, 0xE1);  // amarillo muy claro
+    private static final Color COLOR_TABLA_MEM      = new Color(0xF3, 0xE5, 0xF5);  // lila muy claro
+    private static final Color COLOR_USUARIO        = Color.WHITE;
+    private static final Color COLOR_LIBRE          = new Color(0xF0, 0xF0, 0xF0);  // gris muy claro
+    private static final Color COLOR_IR             = Paleta.AMARILLO_ADVERTENCIA;
 
     public PanelMemoria() {
         construirInterfaz();
@@ -119,12 +115,10 @@ public class PanelMemoria extends JPanel {
         tabla.setFillsViewportHeight(true);
         tabla.getTableHeader().setFont(Paleta.FUENTE_LABEL_BOLD);
 
-        // Anchos de columna
         tabla.getColumnModel().getColumn(0).setPreferredWidth(50);
         tabla.getColumnModel().getColumn(1).setPreferredWidth(100);
         tabla.getColumnModel().getColumn(2).setPreferredWidth(350);
 
-        // Renderer: colorea por zona + resalta IR
         tabla.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
@@ -132,9 +126,7 @@ public class PanelMemoria extends JPanel {
                 Component c = super.getTableCellRendererComponent(
                         table, value, isSelected, hasFocus, row, column);
 
-                if (isSelected) {
-                    return c;
-                }
+                if (isSelected) return c;
 
                 Object posObj = table.getValueAt(row, 0);
                 Object zonaObj = table.getValueAt(row, 1);
@@ -182,10 +174,19 @@ public class PanelMemoria extends JPanel {
         add(panelSur, BorderLayout.SOUTH);
     }
 
+    /**
+     * Leyenda visual de las zonas.
+     */
     private JPanel crearLeyenda() {
         JPanel leyenda = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         leyenda.setOpaque(false);
 
+        leyenda.add(crearItemLeyenda("ListaTrab", COLOR_LISTA_TRABAJOS));
+        leyenda.add(crearItemLeyenda("BCP", COLOR_BCP));
+        leyenda.add(crearItemLeyenda("TablaMem", COLOR_TABLA_MEM));
+        leyenda.add(crearItemLeyenda("Usuario", COLOR_USUARIO));
+        leyenda.add(crearItemLeyenda("Libre", COLOR_LIBRE));
+        leyenda.add(crearItemLeyenda("IR", COLOR_IR));
 
         return leyenda;
     }
@@ -212,7 +213,7 @@ public class PanelMemoria extends JPanel {
     private Color colorDeZona(String zona) {
         if (zona == null) return COLOR_USUARIO;
         switch (zona) {
-            case "ListaProc": return COLOR_LISTA_PROC;
+            case "ListaTrab": return COLOR_LISTA_TRABAJOS;
             case "BCP":       return COLOR_BCP;
             case "TablaMem":  return COLOR_TABLA_MEM;
             case "Usuario":   return COLOR_USUARIO;
@@ -261,9 +262,9 @@ public class PanelMemoria extends JPanel {
     private String calcularZona(int pos) {
         if (memoriaActual == null) return "";
 
-        if (pos >= memoriaActual.getInicioListaProcesos()
-                && pos <= memoriaActual.getFinListaProcesos()) {
-            return "ListaProc";
+        if (pos >= memoriaActual.getInicioListaTrabajos()
+                && pos <= memoriaActual.getFinListaTrabajos()) {
+            return "ListaTrab";
         }
         if (pos >= memoriaActual.getInicioBCPs()
                 && pos <= memoriaActual.getFinBCPs()) {
@@ -311,9 +312,9 @@ public class PanelMemoria extends JPanel {
      * Casos:
      *   - null         → "(vacio)"
      *   - Instruccion  → toString()
-     *   - ListaProc    → "-> BCP id=X (pos Y)"
+     *   - ListaTrab    → "Trabajo N: <nombre> (inicio-fin, zona)"
      *   - BCP          → "NombreCampo: valor"
-     *   - TablaMem     → "Bloque N -> ID Proceso: X", "Inicio: Y", "Tamano: Z"
+     *   - TablaMem     → "ID Proceso: X" / "Inicio: Y" / "Tamano: Z"
      *   - Otro         → toString()
      */
     private String formatearContenido(int pos, Object contenido) {
@@ -324,11 +325,11 @@ public class PanelMemoria extends JPanel {
             return contenido.toString();
         }
 
-        // Caso 1: ¿Es parte de la ListaProcesos?
+        // Caso 1: ¿Es parte de la ListaDeTrabajos?
         if (memoriaActual != null
-                && pos >= memoriaActual.getInicioListaProcesos()
-                && pos <= memoriaActual.getFinListaProcesos()) {
-            return formatearListaProceso(pos, contenido);
+                && pos >= memoriaActual.getInicioListaTrabajos()
+                && pos <= memoriaActual.getFinListaTrabajos()) {
+            return formatearListaTrabajo(pos, contenido);
         }
 
         // Caso 2: ¿Es parte de un BCP?
@@ -354,20 +355,28 @@ public class PanelMemoria extends JPanel {
     }
 
     /**
-     * Formatea una posición de la ListaProcesos.
-     * La ListaProcesos guarda la dirección base del BCP de cada proceso READY.
+     * Formatea una posición de la ListaDeTrabajos.
+     * Cada entrada ocupa 4 posiciones: [nombre, inicio, fin, zona].
      */
-    private String formatearListaProceso(int pos, Object contenido) {
-        if (!(contenido instanceof Integer)) {
-            return contenido.toString();
-        }
-        int dirBCP = (Integer) contenido;
+    private String formatearListaTrabajo(int pos, Object contenido) {
+        int inicio = memoriaActual.getInicioListaTrabajos();
+        int offset = pos - inicio;
 
-        try {
-            BCP bcp = new BCP(memoriaActual, dirBCP);
-            return "-> BCP id=" + bcp.getId() + " (pos " + dirBCP + ")";
-        } catch (Exception e) {
-            return "-> dir=" + dirBCP;
+        int posicionesPorEntrada = Memoria.POSICIONES_POR_ENTRADA_LISTA_TRABAJOS;
+        int numEntrada = offset / posicionesPorEntrada;
+        int posEnEntrada = offset % posicionesPorEntrada;
+
+        switch (posEnEntrada) {
+            case 0:
+                return "Trabajo " + numEntrada + " -> " + contenido;
+            case 1:
+                return "  inicio: " + contenido;
+            case 2:
+                return "  fin: " + contenido;
+            case 3:
+                return "  zona: " + contenido;
+            default:
+                return contenido.toString();
         }
     }
 
@@ -379,7 +388,6 @@ public class PanelMemoria extends JPanel {
         int inicio = memoriaActual.getInicioTablaMemoria();
         int offset = pos - inicio;
 
-        int numBloque = offset / 3;
         int posEnBloque = offset % 3;
 
         switch (posEnBloque) {

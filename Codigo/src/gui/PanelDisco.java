@@ -25,18 +25,23 @@ import java.util.List;
 /**
  * Panel que muestra el contenido del disco.
  *
- * El disco tiene 3 zonas (según el profe):
- *   1. Índice de archivos (nombre, inicio, fin, zona)
- *   2. Memoria virtual (swap)
- *   3. Archivos
+ * El disco tiene 4 zonas:
+ *   1. Índice de archivos ASM (nombre, inicio, fin, zona)
+ *   2. Índice de archivos PROCESO (nombre, inicio, fin, zona)
+ *   3. Memoria virtual (swap)
+ *   4. Archivos
  *
  * La columna "Zona" del índice indica dónde está el contenido:
- *   - PRINCIPAL → en la zona de archivos (94-511).
- *   - VIRTUAL   → en la zona de swap (30-93).
+ *   - PRINCIPAL → en la zona de archivos.
+ *   - VIRTUAL   → en la zona de swap.
  *
- * Arriba: barra de uso TOTAL del disco.
- * Centro: pestañas con cada zona.
- * La columna "Pos" siempre muestra la posición REAL del disco.
+ * La columna "Zona" del índice se colorea:
+ *   - PRINCIPAL → verde claro
+ *   - VIRTUAL   → naranja claro
+ *
+ * La columna "Sección" del índice se colorea:
+ *   - ASM      → azul claro
+ *   - PROCESO  → amarillo claro
  */
 public class PanelDisco extends JPanel {
 
@@ -63,6 +68,14 @@ public class PanelDisco extends JPanel {
     private boolean mostrarSoloOcupadasArchivos = false;
 
     private Disco discoActual;
+
+    /* Colores por sección del índice */
+    private static final Color COLOR_ASM     = new Color(0xE3, 0xF2, 0xFD);  // azul muy claro
+    private static final Color COLOR_PROCESO = new Color(0xFF, 0xF8, 0xE1);  // amarillo muy claro
+
+    /* Colores por zona */
+    private static final Color COLOR_PRINCIPAL = new Color(0xE8, 0xF5, 0xE9);  // verde claro
+    private static final Color COLOR_VIRTUAL   = new Color(0xFF, 0xF3, 0xE0);  // naranja claro
 
     public PanelDisco() {
         construirInterfaz();
@@ -122,15 +135,16 @@ public class PanelDisco extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setOpaque(false);
 
+        // Columnas: Pos | Sección | Nombre | Inicio | Fin | Zona
         modeloIndice = new DefaultTableModel(
-                new Object[]{"Pos", "Nombre", "Inicio", "Fin", "Zona"}, 0) {
+                new Object[]{"Pos", "Sección", "Nombre", "Inicio", "Fin", "Zona"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
 
-        tablaIndice = crearTablaConRendererZona(modeloIndice);
+        tablaIndice = crearTablaConRendererIndice(modeloIndice);
         panel.add(new JScrollPane(tablaIndice), BorderLayout.CENTER);
 
         return panel;
@@ -210,9 +224,6 @@ public class PanelDisco extends JPanel {
 
     /* ==================== TABLAS ==================== */
 
-    /**
-     * Crea una tabla con renderer por defecto (alterna filas).
-     */
     private JTable crearTabla(DefaultTableModel modelo) {
         JTable tabla = new JTable(modelo);
         tabla.setFont(Paleta.FUENTE_MONO);
@@ -240,11 +251,11 @@ public class PanelDisco extends JPanel {
     }
 
     /**
-     * Crea la tabla del índice con un renderer especial para la columna "Zona":
-     *   - PRINCIPAL → verde claro
-     *   - VIRTUAL   → naranja claro
+     * Tabla del índice con renderer especial:
+     *   - Columna "Sección" (1): color por sección (ASM=azul, PROCESO=amarillo)
+     *   - Columna "Zona" (5): color por zona (PRINCIPAL=verde, VIRTUAL=naranja)
      */
-    private JTable crearTablaConRendererZona(DefaultTableModel modelo) {
+    private JTable crearTablaConRendererIndice(DefaultTableModel modelo) {
         JTable tabla = new JTable(modelo);
         tabla.setFont(Paleta.FUENTE_MONO);
         tabla.setRowHeight(22);
@@ -255,10 +266,11 @@ public class PanelDisco extends JPanel {
 
         // Anchos de columna
         tabla.getColumnModel().getColumn(0).setPreferredWidth(50);
-        tabla.getColumnModel().getColumn(1).setPreferredWidth(150);
-        tabla.getColumnModel().getColumn(2).setPreferredWidth(60);
+        tabla.getColumnModel().getColumn(1).setPreferredWidth(80);
+        tabla.getColumnModel().getColumn(2).setPreferredWidth(150);
         tabla.getColumnModel().getColumn(3).setPreferredWidth(60);
-        tabla.getColumnModel().getColumn(4).setPreferredWidth(100);
+        tabla.getColumnModel().getColumn(4).setPreferredWidth(60);
+        tabla.getColumnModel().getColumn(5).setPreferredWidth(100);
 
         tabla.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
@@ -269,15 +281,33 @@ public class PanelDisco extends JPanel {
 
                 if (isSelected) return c;
 
-                // Columna "Zona" (índice 4)
-                if (column == 4) {
+                // Columna "Sección" (1): color por tipo
+                if (column == 1) {
+                    String seccion = (value != null) ? value.toString() : "";
+                    if ("ASM".equals(seccion)) {
+                        c.setBackground(COLOR_ASM);
+                        c.setForeground(new Color(0x0D, 0x47, 0xA1));
+                        setFont(Paleta.FUENTE_MONO_BOLD);
+                    } else if ("PROCESO".equals(seccion)) {
+                        c.setBackground(COLOR_PROCESO);
+                        c.setForeground(new Color(0xBF, 0x60, 0x00));
+                        setFont(Paleta.FUENTE_MONO_BOLD);
+                    } else {
+                        c.setBackground(row % 2 == 0 ? Color.WHITE : Paleta.FONDO_FILA_ALT);
+                        c.setForeground(Paleta.TEXTO_NORMAL);
+                    }
+                    return c;
+                }
+
+                // Columna "Zona" (5): color por zona
+                if (column == 5) {
                     String zona = (value != null) ? value.toString() : "";
                     if ("PRINCIPAL".equals(zona)) {
-                        c.setBackground(new Color(0xE8, 0xF5, 0xE9));  // verde claro
+                        c.setBackground(COLOR_PRINCIPAL);
                         c.setForeground(new Color(0x1B, 0x5E, 0x20));
                         setFont(Paleta.FUENTE_MONO_BOLD);
                     } else if ("VIRTUAL".equals(zona)) {
-                        c.setBackground(new Color(0xFF, 0xF3, 0xE0));  // naranja claro
+                        c.setBackground(COLOR_VIRTUAL);
                         c.setForeground(new Color(0xBF, 0x60, 0x00));
                         setFont(Paleta.FUENTE_MONO_BOLD);
                     } else {
@@ -299,9 +329,6 @@ public class PanelDisco extends JPanel {
 
     /* ==================== ACTUALIZACIÓN ==================== */
 
-    /**
-     * Actualiza la barra total y las 3 pestañas con el contenido del disco.
-     */
     public void actualizar(Disco disco) {
         this.discoActual = disco;
         refrescarUsoTotal();
@@ -335,25 +362,40 @@ public class PanelDisco extends JPanel {
         modeloIndice.setRowCount(0);
         if (discoActual == null) return;
 
-        List<String[]> entradas = discoActual.getIndice();
         int maxArchivos = discoActual.getMaxArchivos();
-        int posicionIndice = discoActual.getInicioIndice();
         int posicionesPorEntrada = Disco.POSICIONES_POR_ENTRADA_INDICE;
 
+        // === Sección ASM ===
+        int inicioAsm = discoActual.getInicioIndiceAsm();
+        List<String[]> entradasAsm = discoActual.getIndice(Disco.TIPO_ASM);
+        int idxAsm = 0;
+
         for (int i = 0; i < maxArchivos; i++) {
-            int posReal = posicionIndice + (i * posicionesPorEntrada);
-            if (i < entradas.size()) {
-                String[] e = entradas.get(i);
-                // e = [nombre, inicio, fin, zona]
+            int posReal = inicioAsm + (i * posicionesPorEntrada);
+            if (idxAsm < entradasAsm.size()) {
+                String[] e = entradasAsm.get(idxAsm++);
                 modeloIndice.addRow(new Object[]{
-                    posReal,
-                    e[0],
-                    e[1],
-                    e[2],
-                    e.length > 3 ? e[3] : "-"
+                    posReal, "ASM", e[0], e[1], e[2], e.length > 3 ? e[3] : "-"
                 });
             } else {
-                modeloIndice.addRow(new Object[]{posReal, "(vacio)", "-", "-", "-"});
+                modeloIndice.addRow(new Object[]{posReal, "ASM", "(vacio)", "-", "-", "-"});
+            }
+        }
+
+        // === Sección PROCESO ===
+        int inicioProc = discoActual.getInicioIndiceProceso();
+        List<String[]> entradasProc = discoActual.getIndice(Disco.TIPO_PROCESO);
+        int idxProc = 0;
+
+        for (int i = 0; i < maxArchivos; i++) {
+            int posReal = inicioProc + (i * posicionesPorEntrada);
+            if (idxProc < entradasProc.size()) {
+                String[] e = entradasProc.get(idxProc++);
+                modeloIndice.addRow(new Object[]{
+                    posReal, "PROCESO", e[0], e[1], e[2], e.length > 3 ? e[3] : "-"
+                });
+            } else {
+                modeloIndice.addRow(new Object[]{posReal, "PROCESO", "(vacio)", "-", "-", "-"});
             }
         }
     }
