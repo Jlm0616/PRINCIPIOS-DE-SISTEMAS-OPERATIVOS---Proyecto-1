@@ -58,6 +58,7 @@ public class VentanaEstadisticas extends JDialog {
     private JLabel lblBase;
     private JLabel lblAlcance;
 
+    // Crea la ventana modal con la lista de procesos terminados.
     public VentanaEstadisticas(Frame propietario, List<BCPTerminado> procesos) {
         super(propietario, "Estadisticas de Procesos", true);
         this.procesos = procesos;
@@ -70,6 +71,7 @@ public class VentanaEstadisticas extends JDialog {
         setLocationRelativeTo(propietario);
     }
 
+    // Calcula la suma de duraciones de todos los procesos terminados.
     private long calcularDuracionTotal() {
         long total = 0;
         for (BCPTerminado pt : procesos) {
@@ -79,6 +81,7 @@ public class VentanaEstadisticas extends JDialog {
         return total;
     }
 
+    // Construye la interfaz: título, resumen, tabla, detalle y botón cerrar.
     private void construirInterfaz() {
         JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
         mainPanel.setBackground(Paleta.FONDO_GENERAL);
@@ -126,6 +129,7 @@ public class VentanaEstadisticas extends JDialog {
 
     /* ==================== RESUMEN ==================== */
 
+    // Crea el panel de resumen con totales y promedios.
     private JPanel crearPanelResumen() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBackground(Color.WHITE);
@@ -173,6 +177,7 @@ public class VentanaEstadisticas extends JDialog {
         return panel;
     }
 
+    // Crea una etiqueta del panel de resumen.
     private JLabel crearLabelResumen(String titulo, String valor) {
         JLabel label = new JLabel(titulo + " " + valor);
         label.setFont(Paleta.FUENTE_MONO);
@@ -182,6 +187,7 @@ public class VentanaEstadisticas extends JDialog {
 
     /* ==================== TABLA ==================== */
 
+    // Crea el panel de la tabla con todos los procesos terminados.
     private JPanel crearPanelTabla() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setOpaque(false);
@@ -263,6 +269,7 @@ public class VentanaEstadisticas extends JDialog {
 
     /* ==================== DETALLE ==================== */
 
+    // Crea el panel de detalle del proceso seleccionado.
     private JPanel crearPanelDetalle() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBackground(Color.WHITE);
@@ -315,6 +322,7 @@ public class VentanaEstadisticas extends JDialog {
         return panel;
     }
 
+    // Crea una etiqueta del panel de detalle.
     private JLabel crearLabelDetalle(String nombre, String valorInicial) {
         JLabel label = new JLabel(nombre + ": " + valorInicial);
         label.setFont(Paleta.FUENTE_MONO);
@@ -328,6 +336,7 @@ public class VentanaEstadisticas extends JDialog {
         return label;
     }
 
+    // Muestra en el panel de detalle el proceso de la fila indicada.
     private void mostrarDetalle(int fila) {
         if (lblId == null) return;   // seguridad
 
@@ -361,11 +370,13 @@ public class VentanaEstadisticas extends JDialog {
 
     /* ==================== HELPERS ==================== */
 
+    // Formatea un LocalDateTime como HH:mm, o "-" si es null.
     private String formatearHora(LocalDateTime t) {
         if (t == null) return "-";
         return t.format(FORMATO_HORA);
     }
 
+    // Formatea una duración en segundos como texto legible.
     private String formatearDuracion(long segundos) {
         if (segundos < 0) return "-";
         long min = segundos / 60;

@@ -57,10 +57,12 @@ public class PanelProcesos extends JPanel {
     private JLabel lblBase;
     private JLabel lblAlcance;
 
+    // Crea el panel y construye su interfaz gráfica.
     public PanelProcesos() {
         construirInterfaz();
     }
 
+    // Construye la interfaz del panel (tabla arriba, BCP abajo).
     private void construirInterfaz() {
         setLayout(new BorderLayout(5, 5));
         setOpaque(false);
@@ -132,6 +134,7 @@ public class PanelProcesos extends JPanel {
         add(scrollBCP, BorderLayout.CENTER);
     }
 
+    // Crea el panel que muestra los campos del BCP actual en formato grid.
     private JPanel crearPanelBCP() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBackground(Color.WHITE);
@@ -190,6 +193,7 @@ public class PanelProcesos extends JPanel {
         return panel;
     }
 
+    // Crea una etiqueta con el estilo de campo del BCP.
     private JLabel crearLabel(String nombre, String valorInicial) {
         JLabel label = new JLabel(nombre + ": " + valorInicial);
         label.setFont(Paleta.FUENTE_MONO);
@@ -203,6 +207,7 @@ public class PanelProcesos extends JPanel {
         return label;
     }
 
+    // Devuelve el color asociado a un estado de proceso.
     private Color colorPorEstado(String estado) {
         if (estado == null) return Paleta.ESTADO_EXIT;
         switch (estado.toUpperCase()) {
@@ -281,6 +286,7 @@ public class PanelProcesos extends JPanel {
         }
     }
 
+    // Actualiza los labels del panel con los datos del BCP indicado.
     public void actualizarBCP(BCP bcp) {
         if (bcp == null) {
             lblId.setText("ID: -");

@@ -19,6 +19,7 @@ public class Planificador {
     private EstrategiaPlanificacion estrategia;
     private ListaProcesos listaProcesos;
 
+    // Crea un planificador con FCFS como estrategia por defecto.
     public Planificador(ListaProcesos listaProcesos) {
         this.listaProcesos = listaProcesos;
         this.estrategia = new PlanificadorFCFS();   // default
@@ -38,10 +39,12 @@ public class Planificador {
         return !listaProcesos.estaVacia();
     }
 
+    // Devuelve la estrategia activa.
     public EstrategiaPlanificacion getEstrategia() {
         return estrategia;
     }
 
+    // Cambia la estrategia activa (no puede ser null).
     public void setEstrategia(EstrategiaPlanificacion estrategia) {
         if (estrategia == null) {
             throw new IllegalArgumentException("La estrategia no puede ser nula");
@@ -49,6 +52,7 @@ public class Planificador {
         this.estrategia = estrategia;
     }
 
+    // Devuelve el nombre legible de la estrategia activa.
     public String getNombreEstrategia() {
         return estrategia.getNombre();
     }

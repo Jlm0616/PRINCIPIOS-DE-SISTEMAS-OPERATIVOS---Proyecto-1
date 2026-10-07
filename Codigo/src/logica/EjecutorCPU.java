@@ -34,6 +34,7 @@ public class EjecutorCPU {
 
     public static final int MAX_CICLOS_AUTOMATICO = 1;
 
+    // Crea el ejecutor para un BCP, con su CPU, memoria y disco.
     public EjecutorCPU(CPU cpu, Memoria memoria, BCP bcp, Disco disco) {
         this.cpu = cpu;
         this.memoria = memoria;
@@ -44,6 +45,7 @@ public class EjecutorCPU {
 
     /* ==================== CICLO PRINCIPAL ==================== */
 
+    // Ejecuta un "segundo" de CPU: fetch, decode y execute de una instrucción.
     public boolean ejecutarSegundoDeCPU() {
         if (programaTerminado) {
             return false;
@@ -104,6 +106,7 @@ public class EjecutorCPU {
         return true;
     }
 
+    // Ejecuta el ciclo hasta que el programa termine o se alcance el máximo.
     public int ejecutarHastaTerminar() {
         int segundos = 0;
         while (!programaTerminado && segundos < MAX_CICLOS_AUTOMATICO) {
@@ -118,6 +121,7 @@ public class EjecutorCPU {
 
     /* ==================== VALIDACIONES ==================== */
 
+    // Indica si el PC está dentro del rango [base, base+alcance).
     private boolean esPcValido(int pc) {
         int base = bcp.getBase();
         int alcance = bcp.getAlcance();
@@ -163,6 +167,7 @@ public class EjecutorCPU {
 
     /* ==================== EJECUCIÓN POR OPCODE ==================== */
 
+    // Ejecuta la operación según el opcode. Devuelve true si fue un salto.
     private boolean ejecutarOperacion(Instruccion instr, int pc) {
         String opcode = instr.getOpcode();
 
@@ -281,6 +286,7 @@ public class EjecutorCPU {
 
     /* ==================== HELPERS POR INSTRUCCIÓN ==================== */
 
+    // Ejecuta MOV: registro ← registro | literal string | número.
     private void ejecutarMOV(Instruccion instr) {
         String destino = instr.getArgumento(0);
 
@@ -297,6 +303,7 @@ public class EjecutorCPU {
         escribirRegistro(destino, instr.getArgumentoComoEntero(1));
     }
 
+    // Ejecuta INC: incrementa AC o el registro indicado.
     private void ejecutarINC(Instruccion instr) {
         if (instr.cantidadArgumentos() == 0) {
             cpu.setAC(limitarA16Bits(cpu.getAC() + 1));
@@ -306,6 +313,7 @@ public class EjecutorCPU {
         }
     }
 
+    // Ejecuta DEC: decrementa AC o el registro indicado.
     private void ejecutarDEC(Instruccion instr) {
         if (instr.cantidadArgumentos() == 0) {
             cpu.setAC(limitarA16Bits(cpu.getAC() - 1));
@@ -315,6 +323,7 @@ public class EjecutorCPU {
         }
     }
 
+    // Ejecuta SWAP: intercambia los valores de dos registros.
     private void ejecutarSWAP(Instruccion instr) {
         String r1 = instr.getArgumento(0);
         String r2 = instr.getArgumento(1);
@@ -324,12 +333,14 @@ public class EjecutorCPU {
         escribirRegistro(r2, v1);
     }
 
+    // Ejecuta CMP: actualiza la bandera de igualdad comparando dos registros.
     private void ejecutarCMP(Instruccion instr) {
         int v1 = leerRegistro(instr.getArgumento(0));
         int v2 = leerRegistro(instr.getArgumento(1));
         cpu.setBanderaIgual(v1 == v2);
     }
 
+    // Ejecuta INT: delega al manejador de interrupciones y actualiza el estado.
     private void ejecutarINT(int codigo) {
         Interrupciones.ResultadoInterrupcion resultado =
                 interrupciones.ejecutar(codigo, bcp);
@@ -349,26 +360,31 @@ public class EjecutorCPU {
 
     /* ==================== CALLBACKS DE INTERRUPCIONES ==================== */
 
+    // Configura el callback de salida a pantalla (propaga a Interrupciones).
     public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
         this.salidaPantalla = callback;
         interrupciones.setSalidaPantalla(callback);
     }
 
+    // Configura el callback de solicitud de teclado (propaga a Interrupciones).
     public void setSolicitudTeclado(java.util.function.Consumer<BCP> callback) {
         interrupciones.setSolicitudTeclado(callback);
     }
 
+    // Configura el callback de solicitud de archivo (propaga a Interrupciones).
     public void setSolicitudArchivo(java.util.function.Consumer<BCP> callback) {
         interrupciones.setSolicitudArchivo(callback);
     }
 
     /* ==================== HELPERS GENERALES ==================== */
 
+    // Convierte el valor a su representación de 16 bits con signo.
     private int limitarA16Bits(int valor) {
         int v = valor & 0xFFFF;
         return (v >= 32768) ? v - 65536 : v;
     }
 
+    // Devuelve el valor del registro indicado como entero.
     private int leerRegistro(String nombre) {
         switch (nombre) {
             case "AC": return cpu.getAC();
@@ -383,6 +399,7 @@ public class EjecutorCPU {
         }
     }
 
+    // Escribe un valor (limitado a 16 bits) en el registro indicado.
     private void escribirRegistro(String nombre, int valor) {
         int valorLimitado = limitarA16Bits(valor);
         switch (nombre) {
@@ -406,6 +423,7 @@ public class EjecutorCPU {
         }
     }
 
+    // Escribe un string en el registro (solo DX lo admite como string).
     private void escribirRegistroString(String nombre, String valor) {
         if ("DX".equals(nombre)) {
             cpu.setDX(valor);

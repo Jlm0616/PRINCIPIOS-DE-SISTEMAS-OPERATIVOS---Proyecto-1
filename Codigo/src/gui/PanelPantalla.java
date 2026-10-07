@@ -31,10 +31,12 @@ public class PanelPantalla extends JPanel {
     private JButton btnEnviar;
     private Consumer<Integer> onEnviar;
 
+    // Crea el panel y construye su interfaz gráfica.
     public PanelPantalla() {
         construirInterfaz();
     }
 
+    // Construye la interfaz del panel (pantalla + entrada + botón).
     private void construirInterfaz() {
         setLayout(new BorderLayout(5, 5));
         setBackground(Paleta.FONDO_PANEL);
@@ -122,6 +124,7 @@ public class PanelPantalla extends JPanel {
         this.onEnviar = callback;
     }
 
+    // Valida el valor ingresado y notifica al callback si es correcto.
     private void enviarValor() {
         String texto = campoEntrada.getText().trim();
         if (texto.isEmpty()) {

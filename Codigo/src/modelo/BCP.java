@@ -144,16 +144,19 @@ public class BCP {
 
     /* ============ ACCESO A MEMORIA ============ */
 
+    // Lee el campo ubicado en el offset indicado.
     private Object leer(int offset) {
         return memoria.leer(direccionBase + offset);
     }
 
+    // Escribe un valor en el campo ubicado en el offset indicado.
     private void escribir(int offset, Object valor) {
         memoria.escribir(direccionBase + offset, valor);
     }
 
     /* ============ EXTRACCIÓN / RESTAURACIÓN ============ */
 
+    // Devuelve los 30 valores del BCP como arreglo.
     public Object[] extraerValores() {
         Object[] valores = new Object[POSICIONES_REQUERIDAS];
         for (int i = 0; i < POSICIONES_REQUERIDAS; i++) {
@@ -162,6 +165,7 @@ public class BCP {
         return valores;
     }
 
+    // Escribe los 30 valores del arreglo en el BCP.
     public void restaurarValores(Object[] valores) {
         if (valores == null || valores.length != POSICIONES_REQUERIDAS) {
             throw new IllegalArgumentException(
@@ -172,6 +176,7 @@ public class BCP {
         }
     }
 
+    // Construye un arreglo con los valores por defecto de un BCP nuevo.
     public static Object[] valoresIniciales(int id, int prioridad, int alcance) {
         Object[] valores = new Object[POSICIONES_REQUERIDAS];
         valores[OFF_ID]             = id;
@@ -209,6 +214,7 @@ public class BCP {
 
     /* ============ SINCRONIZACIÓN CON CPU ============ */
 
+    // Copia el estado de los registros de la CPU al BCP.
     public void actualizarDesdeCPU(CPU cpu) {
         setPc(cpu.getPC());
         setIr(cpu.getIR());
@@ -221,6 +227,7 @@ public class BCP {
         setBanderaIgual(cpu.getBanderaIgual());
     }
 
+    // Carga el estado del BCP en los registros de la CPU.
     public void actualizarHaciaCPU(CPU cpu) {
         cpu.setPC(getPc());
         cpu.setIR(getIr());
@@ -235,6 +242,7 @@ public class BCP {
 
     /* ============ PILA (5 posiciones) ============ */
 
+    // Apila un valor en la primera posicion libre.
     public void apilar(int valor) {
         for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
             int off = OFF_PILA_INICIO + i;
@@ -248,6 +256,7 @@ public class BCP {
             + " (maximo " + TAMANO_MAXIMO_PILA + " elementos)");
     }
 
+    // Desapila y devuelve el valor de la cima.
     public int desapilar() {
         for (int i = TAMANO_MAXIMO_PILA - 1; i >= 0; i--) {
             int off = OFF_PILA_INICIO + i;
@@ -261,6 +270,7 @@ public class BCP {
             "Subdesbordamiento de pila en el proceso " + getId() + " (pila vacia)");
     }
 
+    // Devuelve la pila del proceso como Stack.
     public Stack<Integer> getPila() {
         Stack<Integer> pila = new Stack<>();
         for (int i = 0; i < TAMANO_MAXIMO_PILA; i++) {
@@ -270,6 +280,7 @@ public class BCP {
         return pila;
     }
 
+    // Reemplaza la pila del proceso con la indicada.
     public void setPila(Stack<Integer> pila) {
         if (pila == null) pila = new Stack<>();
         if (pila.size() > TAMANO_MAXIMO_PILA) {
@@ -367,16 +378,19 @@ public class BCP {
 
     /* ============ TIEMPOS ============ */
 
+    // Registra el instante de inicio si aun no estaba marcado.
     public void marcarInicio() {
         if (getTiempoInicio() == null) {
             setTiempoInicio(LocalDateTime.now());
         }
     }
 
+    // Registra el instante de fin del proceso.
     public void marcarFin() {
         setTiempoFin(LocalDateTime.now());
     }
 
+    // Devuelve la duracion en segundos, o -1 si falta inicio o fin.
     public long getDuracionSegundos() {
         LocalDateTime inicio = getTiempoInicio();
         LocalDateTime fin = getTiempoFin();
@@ -386,15 +400,19 @@ public class BCP {
 
     /* ============ AH / AL ============ */
 
+    // Devuelve el byte alto de AX.
     public int getAh() { return (getAx() >> 8) & 0xFF; }
 
+    // Asigna el byte alto de AX, conservando AL.
     public void setAh(int ah) {
         int al = getAl();
         setAx(((ah & 0xFF) << 8) | al);
     }
 
+    // Devuelve el byte bajo de AX.
     public int getAl() { return getAx() & 0xFF; }
 
+    // Asigna el byte bajo de AX, conservando AH.
     public void setAl(int al) {
         int ah = getAh();
         setAx((ah << 8) | (al & 0xFF));

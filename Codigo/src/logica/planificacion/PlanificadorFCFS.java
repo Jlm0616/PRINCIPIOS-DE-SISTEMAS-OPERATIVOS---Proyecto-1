@@ -18,11 +18,13 @@ import modelo.BCP;
  */
 public class PlanificadorFCFS implements EstrategiaPlanificacion {
 
+    // Devuelve el primer proceso de la lista (el que llegó antes).
     @Override
     public BCP seleccionarSiguiente(ListaProcesos listaProcesos) {
         return listaProcesos.verPrimero();
     }
 
+    // Devuelve el nombre identificador del planificador.
     @Override
     public String getNombre() {
         return "FCFS";

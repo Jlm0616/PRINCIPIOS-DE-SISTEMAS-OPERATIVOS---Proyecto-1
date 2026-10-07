@@ -191,14 +191,17 @@ public class Memoria {
 
     /* ==================== ACCESO GENERICO ==================== */
 
+    // Escribe un valor en una posición de la memoria.
     public void escribir(int posicion, Object valor) {
         arregloMemoria[posicion] = valor;
     }
 
+    // Lee el valor de una posición de la memoria.
     public Object leer(int posicion) {
         return arregloMemoria[posicion];
     }
 
+    // Lee una instrucción de una posición, validando el tipo.
     public Instruccion leerInstruccion(int posicion) {
         Object valor = arregloMemoria[posicion];
         if (valor == null) return null;
@@ -210,6 +213,7 @@ public class Memoria {
         return (Instruccion) valor;
     }
 
+    // Lee un BCP de una posición, validando el tipo.
     public BCP leerBCP(int posicion) {
         Object valor = arregloMemoria[posicion];
         if (valor == null) return null;
@@ -295,6 +299,7 @@ public class Memoria {
     public int getMaxProcesos() { return maxProcesos; }
     public int getBcpsQueCaben() { return bcpsQueCaben; }
 
+    // Busca un bloque contiguo libre para un BCP, o -1 si no hay.
     public int reservarBloqueBCP() {
         for (int inicio = inicioBCPs;
              inicio + BCP.POSICIONES_REQUERIDAS - 1 <= finBCPs;
@@ -311,6 +316,7 @@ public class Memoria {
         return -1;
     }
 
+    // Libera el bloque de un BCP (marca sus posiciones como null).
     public void liberarBloqueBCP(int direccionBase) {
         for (int i = 0; i < BCP.POSICIONES_REQUERIDAS; i++) {
             arregloMemoria[direccionBase + i] = null;
@@ -323,6 +329,7 @@ public class Memoria {
     public int getFinTablaMemoria()    { return finTablaMemoria; }
     public int getTamanoTablaMemoria() { return tamanoTablaMemoria; }
 
+    // Escribe un valor en la TablaMemoria por índice lógico.
     public void escribirTablaMemoria(int i, Object valor) {
         if (i < 0 || i >= tamanoTablaMemoria) {
             throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
@@ -330,6 +337,7 @@ public class Memoria {
         arregloMemoria[inicioTablaMemoria + i] = valor;
     }
 
+    // Lee un valor de la TablaMemoria por índice lógico.
     public Object leerTablaMemoria(int i) {
         if (i < 0 || i >= tamanoTablaMemoria) {
             throw new IndexOutOfBoundsException("Indice fuera de TablaMemoria: " + i);
@@ -339,6 +347,7 @@ public class Memoria {
 
     /* ==================== ZONA USUARIO ==================== */
 
+    // Busca un bloque contiguo libre en la zona usuario, o -1 si no hay.
     public int reservarBloqueUsuario(int tamano) {
         if (tamano <= 0) {
             throw new IllegalArgumentException("El tamano del bloque debe ser > 0");
@@ -356,6 +365,7 @@ public class Memoria {
         return -1;
     }
 
+    // Libera un bloque de la zona usuario (marca sus posiciones como null).
     public void liberarBloqueUsuario(int direccionBase, int tamano) {
         for (int i = 0; i < tamano; i++) {
             arregloMemoria[direccionBase + i] = null;
@@ -364,10 +374,12 @@ public class Memoria {
 
     /* ==================== CONSULTAS ==================== */
 
+    // Indica si una posición pertenece a la zona kernel.
     public boolean esZonaKernel(int posicion) {
         return posicion < limiteKernelUsuario;
     }
 
+    // Indica si un programa de N posiciones cabe en la zona usuario.
     public boolean cabeProgramaDeUsuario(int cantidadPosiciones) {
         return cantidadPosiciones <= getEspacioUsuarioDisponible();
     }
@@ -376,10 +388,12 @@ public class Memoria {
     public int getLimiteKernelUsuario() { return limiteKernelUsuario; }
     public Object[] getArregloMemoria() { return arregloMemoria; }
 
+    // Devuelve cuántas posiciones tiene la zona usuario.
     public int getEspacioUsuarioDisponible() {
         return tamanoMemoria - limiteKernelUsuario;
     }
 
+    // Devuelve cuántas posiciones tiene la zona kernel.
     public int getTamanoKernel() {
         return limiteKernelUsuario;
     }

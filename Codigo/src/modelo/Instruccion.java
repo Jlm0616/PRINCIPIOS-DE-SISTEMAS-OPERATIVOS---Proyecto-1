@@ -18,29 +18,35 @@ public class Instruccion {
     private String opcode;
     private List<String> argumentos;
 
+    // Crea una instrucción con opcode y lista de argumentos.
     public Instruccion(String opcode, List<String> argumentos) {
         this.opcode = opcode;
         this.argumentos = (argumentos != null) ? argumentos : new ArrayList<>();
     }
 
+    // Crea una instrucción sin argumentos.
     public Instruccion(String opcode) {
         this(opcode, new ArrayList<>());
     }
 
     /* ==================== GETTERS BASICOS ==================== */
 
+    // Devuelve el opcode de la instrucción.
     public String getOpcode() {
         return opcode;
     }
 
+    // Devuelve la lista de argumentos (solo lectura).
     public List<String> getArgumentos() {
         return Collections.unmodifiableList(argumentos);
     }
 
+    // Devuelve cuántos argumentos tiene la instrucción.
     public int cantidadArgumentos() {
         return argumentos.size();
     }
 
+    // Devuelve el argumento en la posición indicada.
     public String getArgumento(int indice) {
         return argumentos.get(indice);
     }
@@ -133,6 +139,7 @@ public class Instruccion {
         return arg;
     }
 
+    // Devuelve el código hexadecimal de la interrupción (ej. "21H" → 0x21).
     public int getCodigoInterrupcion(int indice) {
         String codigo = argumentos.get(indice).toUpperCase();
         return Integer.parseInt(codigo.substring(0, codigo.length() - 1), 16);
@@ -140,6 +147,7 @@ public class Instruccion {
 
     /* ==================== PESO ==================== */
 
+    // Devuelve el peso (en ciclos) de la instrucción según su opcode.
     public int getPeso() {
         switch (opcode) {
             case "LOAD":  return 2;
@@ -164,6 +172,7 @@ public class Instruccion {
         }
     }
 
+    // Calcula el peso de una instrucción INT según su código.
     private int pesoDeINT() {
         int codigo = getCodigoInterrupcion(0);
         switch (codigo) {

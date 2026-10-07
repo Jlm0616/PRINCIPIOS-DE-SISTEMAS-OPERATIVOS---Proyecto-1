@@ -40,10 +40,12 @@ public class PanelConfigDisco extends JPanel {
     private static final int TAMANO_SWAP_MINIMO = Disco.TAMANO_SWAP_MINIMO;
     private static final int TAMANO_SWAP_MAXIMO = 65536;
 
+    // Crea el panel con los valores actuales de configuración.
     public PanelConfigDisco(int tamanoActual, int maxArchivosActual, int swapActual) {
         construirInterfaz(tamanoActual, maxArchivosActual, swapActual);
     }
 
+    // Construye la interfaz gráfica del panel con sus campos y etiquetas.
     private void construirInterfaz(int tamanoActual, int maxArchivosActual, int swapActual) {
         setLayout(new GridBagLayout());
         setBackground(Paleta.FONDO_PANEL);
@@ -131,6 +133,7 @@ public class PanelConfigDisco extends JPanel {
         add(lblAyuda, gbc);
     }
 
+    // Crea una etiqueta con el estilo de campo del formulario.
     private JLabel crearLabelCampo(String texto) {
         JLabel label = new JLabel(texto + ":");
         label.setFont(Paleta.FUENTE_LABEL_BOLD);
@@ -138,6 +141,7 @@ public class PanelConfigDisco extends JPanel {
         return label;
     }
 
+    // Crea un campo de texto con el estilo del formulario.
     private JTextField crearCampoTexto(String valorInicial) {
         JTextField campo = new JTextField(valorInicial, 12);
         campo.setFont(Paleta.FUENTE_MONO);
@@ -150,6 +154,7 @@ public class PanelConfigDisco extends JPanel {
         return campo;
     }
 
+    // Valida los valores ingresados; muestra diálogo de error si fallan.
     public boolean validar() {
         int tamanoIngresado;
         int maxArchivosIngresado;
@@ -211,19 +216,23 @@ public class PanelConfigDisco extends JPanel {
         return true;
     }
 
+    // Muestra un diálogo modal de error con el mensaje indicado.
     private void mostrarError(String mensaje) {
         javax.swing.JOptionPane.showMessageDialog(this, mensaje,
                 "Datos invalidos", javax.swing.JOptionPane.ERROR_MESSAGE);
     }
 
+    // Devuelve el tamaño total del disco ingresado.
     public int getTamanoDisco() {
         return Integer.parseInt(txtTamanoDisco.getText().trim());
     }
 
+    // Devuelve la cantidad máxima de archivos ingresada.
     public int getMaxArchivos() {
         return Integer.parseInt(txtMaxArchivos.getText().trim());
     }
 
+    // Devuelve el tamaño del swap ingresado.
     public int getTamanoSwap() {
         return Integer.parseInt(txtTamanoSwap.getText().trim());
     }

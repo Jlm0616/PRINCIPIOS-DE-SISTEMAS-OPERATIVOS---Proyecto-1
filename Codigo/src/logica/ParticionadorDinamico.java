@@ -30,6 +30,7 @@ public class ParticionadorDinamico {
     private final List<BloqueLibre> bloquesLibres;
     private final Memoria memoria;
 
+    // Crea el particionador con un unico hueco libre que cubre toda la zona usuario.
     public ParticionadorDinamico(Memoria memoria,
                                   int inicioZonaUsuario,
                                   int espacioUsuarioDisponible) {
@@ -46,6 +47,7 @@ public class ParticionadorDinamico {
 
     /* ==================== ASIGNACION ==================== */
 
+    // Asigna una particion FIRST-FIT y registra el bloque en la TablaMemoria.
     public int asignarParticion(int tamano, int idProceso) {
         if (tamano <= 0) return -1;
 
@@ -70,6 +72,7 @@ public class ParticionadorDinamico {
 
     /* ==================== LIBERACION ==================== */
 
+    // Libera una particion, fusiona huecos vecinos y limpia la TablaMemoria.
     public void liberarParticion(int base, int tamano, int idProceso) {
         if (tamano <= 0) return;
 
@@ -79,6 +82,7 @@ public class ParticionadorDinamico {
         eliminarDeTablaMemoria(idProceso);
     }
 
+    // Fusiona huecos contiguos en uno solo.
     private void fusionarBloques() {
         bloquesLibres.sort((a, b) -> Integer.compare(a.inicio, b.inicio));
 
@@ -146,20 +150,24 @@ public class ParticionadorDinamico {
 
     /* ==================== CONSULTAS ==================== */
 
+    // Devuelve el espacio libre total en la zona usuario.
     public int getEspacioLibre() {
         int total = 0;
         for (BloqueLibre b : bloquesLibres) total += b.tamano;
         return total;
     }
 
+    // Devuelve cuántos huecos libres hay actualmente.
     public int getCantidadHuecos() { return bloquesLibres.size(); }
 
+    // Devuelve el tamaño del hueco libre más grande.
     public int getHuecoMasGrande() {
         int max = 0;
         for (BloqueLibre b : bloquesLibres) if (b.tamano > max) max = b.tamano;
         return max;
     }
 
+    // Indica si existe algún hueco con espacio suficiente.
     public boolean hayEspacioPara(int tamano) {
         for (BloqueLibre b : bloquesLibres) if (b.tamano >= tamano) return true;
         return false;
@@ -169,6 +177,7 @@ public class ParticionadorDinamico {
     public int getFinZonaUsuario() { return finZonaUsuario; }
     public int getEspacioTotal() { return finZonaUsuario - inicioZonaUsuario; }
 
+    // Representa un hueco libre como (inicio, tamano).
     private static class BloqueLibre {
         int inicio;
         int tamano;

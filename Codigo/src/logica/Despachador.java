@@ -41,6 +41,7 @@ public class Despachador {
     private Consumer<BCP> solicitudTeclado;
     private Consumer<BCP> solicitudArchivo;
 
+    // Crea el despachador con la CPU y memoria indicadas.
     public Despachador(CPU cpu, Memoria memoria) {
         this.cpu = cpu;
         this.memoria = memoria;
@@ -138,6 +139,7 @@ public class Despachador {
         return direccionBCPActual;
     }
 
+    // Indica si el proceso actual está listo para seguir ejecutando.
     public boolean procesoActualOcupaCPU() {
         if (ejecutorActual == null) return false;
         if (ejecutorActual.isProgramaTerminado()) return false;
@@ -145,6 +147,7 @@ public class Despachador {
         return true;
     }
 
+    // Libera el ejecutor y marca que no hay BCP actual.
     public void limpiarEjecutor() {
         this.ejecutorActual = null;
         this.direccionBCPActual = -1;
@@ -152,18 +155,22 @@ public class Despachador {
 
     /* ==================== CALLBACKS ==================== */
 
+    // Configura el callback de salida a pantalla.
     public void setSalidaPantalla(Consumer<String> callback) {
         this.salidaPantalla = callback;
     }
 
+    // Configura el callback de solicitud de teclado.
     public void setSolicitudTeclado(Consumer<BCP> callback) {
         this.solicitudTeclado = callback;
     }
 
+    // Configura el callback de solicitud de archivo.
     public void setSolicitudArchivo(Consumer<BCP> callback) {
         this.solicitudArchivo = callback;
     }
 
+    // Asigna el disco que usarán las interrupciones.
     public void setDisco(Disco disco) {
         this.disco = disco;
     }

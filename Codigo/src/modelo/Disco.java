@@ -94,6 +94,11 @@ public class Disco {
 
     /* ==================== CONSTRUCTOR ==================== */
 
+    /**
+     * Crea un disco con las tres zonas (índice ASM, índice PROCESO, swap)
+     * y calcula el inicio de cada zona y el espacio restante para archivos.
+     * Lanza excepción si los tamaños no permiten un disco válido.
+     */
     public Disco(int tamanoTotal, int maxArchivos, int tamanoSwap) {
         if (tamanoTotal < TAMANO_MINIMO) {
             throw new IllegalArgumentException(
@@ -137,10 +142,12 @@ public class Disco {
 
     /* ==================== ACCESO PUNTUAL ==================== */
 
+    // Lee el contenido de una posición del disco.
     public Object leer(int posicion) {
         return posiciones[posicion];
     }
 
+    // Escribe un valor en una posición del disco.
     public void escribir(int posicion, Object valor) {
         posiciones[posicion] = valor;
     }
@@ -269,6 +276,7 @@ public class Disco {
         return (inicio != null) ? inicio : -1;
     }
 
+    // Devuelve la posición final del archivo, o -1 si no existe.
     public int getFinArchivo(String nombre, String tipo) {
         int entrada = buscarEntradaPorNombre(nombre, getInicioIndicePorTipo(tipo));
         if (entrada == -1) return -1;
@@ -276,6 +284,7 @@ public class Disco {
         return (fin != null) ? fin : -1;
     }
 
+    // Devuelve la zona donde está el archivo (PRINCIPAL/VIRTUAL), o null.
     public String getZonaArchivo(String nombre, String tipo) {
         int entrada = buscarEntradaPorNombre(nombre, getInicioIndicePorTipo(tipo));
         if (entrada == -1) return null;
@@ -298,6 +307,7 @@ public class Disco {
 
     /* ==================== CONSULTAS DEL ÍNDICE ==================== */
 
+    // Devuelve cuántos archivos hay registrados en el índice del tipo indicado.
     public int getCantidadArchivos(String tipo) {
         return contarArchivos(getInicioIndicePorTipo(tipo));
     }
@@ -326,6 +336,7 @@ public class Disco {
         return lista;
     }
 
+    // Cuenta las entradas ocupadas en un índice.
     private int contarArchivos(int inicio) {
         int contador = 0;
         for (int i = 0; i < maxArchivos; i++) {
@@ -335,6 +346,7 @@ public class Disco {
         return contador;
     }
 
+    // Devuelve la primera entrada libre del índice, o -1 si está lleno.
     private int buscarEntradaLibre(int inicio) {
         for (int i = 0; i < maxArchivos; i++) {
             int entrada = inicio + i * POSICIONES_POR_ENTRADA_INDICE;
@@ -343,6 +355,7 @@ public class Disco {
         return -1;
     }
 
+    // Busca la entrada cuyo nombre coincida, o -1 si no existe.
     private int buscarEntradaPorNombre(String nombre, int inicio) {
         if (nombre == null) return -1;
         for (int i = 0; i < maxArchivos; i++) {
@@ -355,6 +368,7 @@ public class Disco {
 
     /* ==================== ZONA 3: MEMORIA VIRTUAL (SWAP) ==================== */
 
+    // Busca un bloque contiguo libre en swap, o -1 si no hay espacio.
     public int reservarBloqueSwap(int tamano) {
         if (tamano <= 0 || tamano > tamanoSwap) return -1;
         for (int inicio = inicioSwap; inicio <= inicioSwap + tamanoSwap - tamano; inicio++) {
@@ -370,12 +384,14 @@ public class Disco {
         return -1;
     }
 
+    // Escribe un arreglo de valores en un bloque de swap.
     public void escribirBloqueSwap(int direccionBase, Object[] valores) {
         for (int i = 0; i < valores.length; i++) {
             posiciones[direccionBase + i] = valores[i];
         }
     }
 
+    // Lee un bloque de swap y lo devuelve como arreglo.
     public Object[] leerBloqueSwap(int direccionBase, int tamano) {
         Object[] valores = new Object[tamano];
         for (int i = 0; i < tamano; i++) {
@@ -384,12 +400,14 @@ public class Disco {
         return valores;
     }
 
+    // Libera un bloque de swap (marca sus posiciones como null).
     public void liberarBloqueSwap(int direccionBase, int tamano) {
         for (int i = 0; i < tamano; i++) {
             posiciones[direccionBase + i] = null;
         }
     }
 
+    // Devuelve cuántas posiciones libres quedan en swap.
     public int getEspacioSwapLibre() {
         int contador = 0;
         for (int i = 0; i < tamanoSwap; i++) {
@@ -398,12 +416,14 @@ public class Disco {
         return contador;
     }
 
+    // Indica si el swap está completamente lleno.
     public boolean swapEstaLleno() {
         return getEspacioSwapLibre() == 0;
     }
 
     /* ==================== ZONA 4: ARCHIVOS ==================== */
 
+    // Busca un bloque contiguo libre en la zona de archivos, o -1 si no hay.
     public int reservarBloqueArchivo(int tamano) {
         if (tamano <= 0) return -1;
         int finZona = tamanoTotal;
@@ -420,12 +440,14 @@ public class Disco {
         return -1;
     }
 
+    // Escribe un arreglo de valores en un bloque de la zona de archivos.
     public void escribirBloqueArchivo(int direccionBase, Object[] valores) {
         for (int i = 0; i < valores.length; i++) {
             posiciones[direccionBase + i] = valores[i];
         }
     }
 
+    // Lee un bloque de la zona de archivos y lo devuelve como arreglo.
     public Object[] leerBloqueArchivo(int direccionBase, int tamano) {
         Object[] valores = new Object[tamano];
         for (int i = 0; i < tamano; i++) {
@@ -434,12 +456,14 @@ public class Disco {
         return valores;
     }
 
+    // Libera un bloque de la zona de archivos (marca sus posiciones como null).
     public void liberarBloqueArchivo(int direccionBase, int tamano) {
         for (int i = 0; i < tamano; i++) {
             posiciones[direccionBase + i] = null;
         }
     }
 
+    // Devuelve cuántas posiciones libres quedan en la zona de archivos.
     public int getEspacioArchivosLibre() {
         int contador = 0;
         int tamanoZona = tamanoTotal - inicioArchivos;
@@ -461,6 +485,7 @@ public class Disco {
     public int getInicioSwap() { return inicioSwap; }
     public int getInicioArchivos() { return inicioArchivos; }
 
+    // Devuelve cuántas posiciones del disco están ocupadas.
     public int getEspacioOcupado() {
         int contador = 0;
         for (int i = 0; i < tamanoTotal; i++) {

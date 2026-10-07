@@ -75,6 +75,7 @@ public class PanelConfigMemoria extends JPanel {
         construirInterfaz(tamanoActual, limiteActual);
     }
 
+    // Construye la interfaz gráfica del panel con sus campos y etiquetas.
     private void construirInterfaz(int tamanoActual, int limiteActual) {
         setLayout(new GridBagLayout());
         setBackground(Paleta.FONDO_PANEL);
@@ -183,6 +184,7 @@ public class PanelConfigMemoria extends JPanel {
         });
     }
 
+    // Crea una etiqueta con el estilo de campo del formulario.
     private JLabel crearLabelCampo(String texto) {
         JLabel label = new JLabel(texto + ":");
         label.setFont(Paleta.FUENTE_LABEL_BOLD);
@@ -190,6 +192,7 @@ public class PanelConfigMemoria extends JPanel {
         return label;
     }
 
+    // Crea un campo de texto con el estilo del formulario.
     private JTextField crearCampoTexto(String valorInicial) {
         JTextField campo = new JTextField(valorInicial, 12);
         campo.setFont(Paleta.FUENTE_MONO);
@@ -202,6 +205,7 @@ public class PanelConfigMemoria extends JPanel {
         return campo;
     }
 
+    // Sugiere automáticamente el 30% de la memoria como límite del kernel.
     private void sugerirLimite() {
         if (limiteEditadoManualmente) return;
         try {
@@ -288,15 +292,18 @@ public class PanelConfigMemoria extends JPanel {
         return true;
     }
 
+    // Muestra un diálogo modal de error con el mensaje indicado.
     private void mostrarError(String mensaje) {
         javax.swing.JOptionPane.showMessageDialog(this, mensaje,
                 "Datos invalidos", javax.swing.JOptionPane.ERROR_MESSAGE);
     }
 
+    // Devuelve el tamaño de memoria ingresado.
     public int getTamanoMemoria() {
         return Integer.parseInt(txtTamanoMemoria.getText().trim());
     }
 
+    // Devuelve el límite kernel/usuario ingresado.
     public int getLimiteKernel() {
         return Integer.parseInt(txtLimiteKernel.getText().trim());
     }

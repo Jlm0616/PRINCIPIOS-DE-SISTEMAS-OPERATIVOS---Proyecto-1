@@ -72,6 +72,7 @@ public class VentanaConfiguracion extends JDialog {
         setLocationRelativeTo(propietario);
     }
 
+    // Construye la interfaz: pestañas Memoria/Disco + botones Aceptar/Cancelar.
     private void construirInterfaz(int tamanoMemoriaActual,
                                     int limiteKernelActual,
                                     int tamanoDiscoActual,
@@ -108,6 +109,7 @@ public class VentanaConfiguracion extends JDialog {
         add(panelBotones, BorderLayout.SOUTH);
     }
 
+    // Valida ambos paneles (con validación cruzada) y cierra si todo es correcto.
     private void validarYConfirmar() {
         // Validar memoria (30% + minimo para 1 BCP + ListaDeTrabajos)
         if (!panelMemoria.validar()) {
@@ -159,26 +161,32 @@ public class VentanaConfiguracion extends JDialog {
         dispose();
     }
 
+    // Indica si el usuario confirmó la configuración.
     public boolean isConfirmado() {
         return confirmado;
     }
 
+    // Devuelve el tamaño de memoria configurado.
     public int getTamanoMemoria() {
         return tamanoMemoria;
     }
 
+    // Devuelve el límite kernel/usuario configurado.
     public int getLimiteKernel() {
         return limiteKernel;
     }
 
+    // Devuelve el tamaño de disco configurado.
     public int getTamanoDisco() {
         return tamanoDisco;
     }
 
+    // Devuelve la cantidad máxima de archivos configurada.
     public int getMaxArchivos() {
         return maxArchivos;
     }
 
+    // Devuelve el tamaño del swap configurado.
     public int getTamanoSwap() {
         return tamanoSwap;
     }

@@ -38,6 +38,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+// Ventana principal de la aplicación: arma la UI y orquesta todo el sistema.
 public class VentanaPrincipal extends JFrame {
 
     private ConfiguracionExterna config;
@@ -75,6 +76,7 @@ public class VentanaPrincipal extends JFrame {
     private static final DateTimeFormatter FORMATO_HORA =
             DateTimeFormatter.ofPattern("HH:mm");
 
+    // Crea la ventana principal, carga config y arma todo el sistema.
     public VentanaPrincipal() {
         super("Proyecto 1 de SO");
 
@@ -114,6 +116,7 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
+    // Copia los valores de la configuración externa a los campos actuales.
     private void aplicarConfiguracion(ConfiguracionExterna config) {
         this.tamanoMemoriaActual = config.getMemoria();
         this.limiteKernelActual = config.getKernel();
@@ -123,6 +126,7 @@ public class VentanaPrincipal extends JFrame {
         this.tamanoSwapActual = config.getMemoriaVirtual();
     }
 
+    // Aplica el LookAndFeel Nimbus si está disponible.
     private void aplicarLookAndFeel() {
         try {
             for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
@@ -179,6 +183,7 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
+    // Arma los paneles principales (encabezado, centro, pantalla).
     private void inicializarComponentes() {
         JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
         mainPanel.setBackground(Paleta.FONDO_GENERAL);
@@ -205,6 +210,7 @@ public class VentanaPrincipal extends JFrame {
         configurarCallbacks();
     }
 
+    // Conecta los callbacks del gestor con los paneles de la GUI.
     private void configurarCallbacks() {
         gestor.setSalidaPantalla(mensaje -> panelPantalla.agregarMensaje(mensaje));
 
@@ -241,6 +247,7 @@ public class VentanaPrincipal extends JFrame {
         });
     }
 
+    // Crea el encabezado con el título y los botones de acción.
     private JPanel crearEncabezado() {
         JPanel encabezado = new JPanel(new BorderLayout());
         encabezado.setOpaque(false);
@@ -285,6 +292,7 @@ public class VentanaPrincipal extends JFrame {
         return encabezado;
     }
 
+    // Crea un botón con el estilo uniforme de la aplicación.
     private JButton crearBoton(String texto, Color color) {
         JButton boton = new JButton(texto);
         boton.setPreferredSize(new Dimension(150, 36));
@@ -299,6 +307,7 @@ public class VentanaPrincipal extends JFrame {
         return boton;
     }
 
+    // Abre un diálogo para cargar uno o varios archivos .asm.
     private void cargarArchivo() {
         FileDialog fileDialog = new FileDialog(this, "Seleccionar archivos ASM", FileDialog.LOAD);
         fileDialog.setMultipleMode(true);
@@ -340,6 +349,7 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
+    // Carga un único archivo .asm. Devuelve 1=OK, 0=error, -1=en espera.
     private int cargarUnArchivo(File archivo) {
         if (!archivo.getName().toLowerCase().endsWith(".asm")) {
             JOptionPane.showMessageDialog(this,
@@ -373,6 +383,7 @@ public class VentanaPrincipal extends JFrame {
         return 0;
     }
 
+    // Ejecuta un único paso del gestor y refresca la UI.
     private void ejecutarUnPaso() {
         if (!gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
@@ -388,6 +399,7 @@ public class VentanaPrincipal extends JFrame {
         }
     }
 
+    // Ejecuta el ciclo completo en un SwingWorker (sin bloquear la UI).
     private void ejecutarAutomatico() {
         if (!gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
@@ -433,6 +445,7 @@ public class VentanaPrincipal extends JFrame {
         workerAutomatico.execute();
     }
 
+    // Deshabilita los botones mientras corre la ejecución automática.
     private void deshabilitarBotones() {
         btnCargar.setEnabled(false);
         btnEjecutar.setEnabled(false);
@@ -441,6 +454,7 @@ public class VentanaPrincipal extends JFrame {
         btnConfigurar.setEnabled(false);
     }
 
+    // Vuelve a habilitar los botones tras la ejecución automática.
     private void habilitarBotones() {
         btnCargar.setEnabled(true);
         btnEjecutar.setEnabled(true);
@@ -449,6 +463,7 @@ public class VentanaPrincipal extends JFrame {
         btnConfigurar.setEnabled(true);
     }
 
+    // Abre la ventana de configuración y aplica los cambios si son válidos.
     private void abrirConfiguracion() {
         if (gestor.hayProcesosActivos()) {
             JOptionPane.showMessageDialog(this,
@@ -528,6 +543,7 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
+    // Reinicia el sistema con la configuración actual.
     private void limpiar() {
         inicializarSistema();
         configurarCallbacks();
@@ -536,6 +552,7 @@ public class VentanaPrincipal extends JFrame {
         refrescarTodo();
     }
 
+    // Muestra en pantalla un resumen de la configuración aplicada.
     private void mostrarMensajeConfiguracion() {
         panelPantalla.agregarMensaje(">> Configuracion aplicada:");
         panelPantalla.agregarMensaje(">>   Memoria: " + tamanoMemoriaActual + " posiciones");
@@ -560,6 +577,7 @@ public class VentanaPrincipal extends JFrame {
                 + "-" + (tamanoDiscoActual - 1));
     }
 
+    // Imprime en el panel de pantalla el resumen de procesos terminados.
     private void imprimirEstadisticasEnPantalla() {
         List<BCPTerminado> terminados = gestor.getProcesosTerminados();
         if (terminados.isEmpty()) return;
@@ -589,11 +607,13 @@ public class VentanaPrincipal extends JFrame {
         panelPantalla.agregarMensaje("");
     }
 
+    // Formatea un LocalDateTime como HH:mm, o "  -  " si es null.
     private String formatearHora(LocalDateTime t) {
         if (t == null) return "  -  ";
         return t.format(FORMATO_HORA);
     }
 
+    // Abre la ventana modal de estadísticas de procesos terminados.
     private void mostrarEstadisticas() {
         List<BCPTerminado> terminados = gestor.getProcesosTerminados();
         if (terminados.isEmpty()) {
@@ -607,6 +627,7 @@ public class VentanaPrincipal extends JFrame {
         ventana.setVisible(true);
     }
 
+    // Refresca todos los paneles de la UI con el estado actual del sistema.
     private void refrescarTodo() {
         BCP actual = gestor.getProcesoActual();
 

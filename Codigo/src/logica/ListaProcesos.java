@@ -90,18 +90,24 @@ public class ListaProcesos {
 
     /* ==================== CONSULTAS ==================== */
 
+    // Indica si la lista no tiene procesos.
     public boolean estaVacia() { return lista.isEmpty(); }
+
+    // Devuelve cuántos procesos hay en la lista.
     public int getCantidad()   { return lista.size(); }
 
+    // Indica si un BCP está en la lista.
     public boolean contiene(BCP bcp) {
         if (bcp == null) return false;
         return lista.contains(bcp);
     }
 
+    // Devuelve una copia de la lista como ArrayList.
     public List<BCP> toList() {
         return new ArrayList<>(lista);
     }
 
+    // Devuelve las direcciones base de todos los BCPs, en orden.
     public List<Integer> getDirecciones() {
         List<Integer> dirs = new ArrayList<>();
         for (BCP bcp : lista) {

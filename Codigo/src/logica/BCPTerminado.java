@@ -26,6 +26,7 @@ public class BCPTerminado {
     private final int alcance;
     private final int prioridad;
 
+    // Crea un snapshot con los datos del proceso terminado.
     public BCPTerminado(int id, EstadoProceso estadoFinal,
                         LocalDateTime tiempoInicio, LocalDateTime tiempoFin,
                         int base, int alcance, int prioridad) {
@@ -46,6 +47,7 @@ public class BCPTerminado {
     public int getAlcance() { return alcance; }
     public int getPrioridad() { return prioridad; }
 
+    // Devuelve la duración del proceso en segundos, o -1 si faltan tiempos.
     public long getDuracionSegundos() {
         if (tiempoInicio == null || tiempoFin == null) return -1;
         return Duration.between(tiempoInicio, tiempoFin).getSeconds();

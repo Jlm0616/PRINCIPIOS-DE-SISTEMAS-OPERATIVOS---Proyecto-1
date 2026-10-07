@@ -77,10 +77,12 @@ public class PanelDisco extends JPanel {
     private static final Color COLOR_PRINCIPAL = new Color(0xE8, 0xF5, 0xE9);  // verde claro
     private static final Color COLOR_VIRTUAL   = new Color(0xFF, 0xF3, 0xE0);  // naranja claro
 
+    // Crea el panel y construye su interfaz gráfica.
     public PanelDisco() {
         construirInterfaz();
     }
 
+    // Construye la interfaz del panel (barra de uso + pestañas).
     private void construirInterfaz() {
         setLayout(new BorderLayout(5, 5));
         setBackground(Paleta.FONDO_PANEL);
@@ -131,6 +133,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== PESTAÑA 1: ÍNDICE ==================== */
 
+    // Crea el panel de la pestaña Índice con su tabla.
     private JPanel crearPanelIndice() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setOpaque(false);
@@ -152,6 +155,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== PESTAÑA 2: MEMORIA VIRTUAL ==================== */
 
+    // Crea el panel de la pestaña Memoria Virtual (swap) con su tabla.
     private JPanel crearPanelSwap() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setOpaque(false);
@@ -188,6 +192,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== PESTAÑA 3: ARCHIVOS ==================== */
 
+    // Crea el panel de la pestaña Archivos con su tabla.
     private JPanel crearPanelArchivos() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setOpaque(false);
@@ -224,6 +229,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== TABLAS ==================== */
 
+    // Crea una tabla con renderer alternado (filas pares blancas, impares gris).
     private JTable crearTabla(DefaultTableModel modelo) {
         JTable tabla = new JTable(modelo);
         tabla.setFont(Paleta.FUENTE_MONO);
@@ -329,6 +335,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== ACTUALIZACIÓN ==================== */
 
+    // Refresca todas las vistas del panel con el disco indicado.
     public void actualizar(Disco disco) {
         this.discoActual = disco;
         refrescarUsoTotal();
@@ -339,6 +346,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== USO TOTAL ==================== */
 
+    // Actualiza la barra de uso total del disco.
     private void refrescarUsoTotal() {
         if (discoActual == null) {
             barraUsoTotal.setValue(0);
@@ -358,6 +366,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== ÍNDICE ==================== */
 
+    // Refresca la tabla del índice (secciones ASM y PROCESO).
     private void refrescarIndice() {
         modeloIndice.setRowCount(0);
         if (discoActual == null) return;
@@ -402,6 +411,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== SWAP ==================== */
 
+    // Refresca la tabla del swap (respetando el filtro activo).
     private void refrescarSwap() {
         modeloSwap.setRowCount(0);
         if (discoActual == null) return;
@@ -419,6 +429,7 @@ public class PanelDisco extends JPanel {
 
     /* ==================== ARCHIVOS ==================== */
 
+    // Refresca la tabla de archivos (respetando el filtro activo).
     private void refrescarArchivos() {
         modeloArchivos.setRowCount(0);
         if (discoActual == null) return;

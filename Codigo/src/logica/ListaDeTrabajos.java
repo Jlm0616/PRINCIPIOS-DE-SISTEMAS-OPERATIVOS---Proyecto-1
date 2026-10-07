@@ -126,18 +126,22 @@ public class ListaDeTrabajos {
 
     /* ==================== CONSULTAS ==================== */
 
+    // Indica si no hay trabajos en la lista.
     public boolean estaVacia() {
         return memoria.contarListaTrabajos() == 0;
     }
 
+    // Devuelve cuántos trabajos hay en la lista.
     public int getCantidad() {
         return memoria.contarListaTrabajos();
     }
 
+    // Devuelve cuántos trabajos caben en la lista.
     public int getCapacidad() {
         return memoria.getMaxArchivos();
     }
 
+    // Indica si la lista está llena.
     public boolean estaLlena() {
         return getCantidad() >= getCapacidad();
     }

@@ -39,12 +39,14 @@ public class Interrupciones {
 
     /* ==================== CONSTRUCTOR ==================== */
 
+    // Crea el manejador de interrupciones con el disco indicado.
     public Interrupciones(Disco disco) {
         this.disco = disco;
     }
 
     /* ==================== EJECUCION ==================== */
 
+    // Ejecuta la interrupción correspondiente al código indicado.
     public ResultadoInterrupcion ejecutar(int codigo, BCP bcp) {
         switch (codigo) {
             case 0x20: return ejecutarFinPrograma(bcp);
@@ -59,6 +61,7 @@ public class Interrupciones {
 
     /* ==================== MANEJADORES ==================== */
 
+    // INT 20H: marca el fin del programa.
     private ResultadoInterrupcion ejecutarFinPrograma(BCP bcp) {
         bcp.marcarFin();
         return ResultadoInterrupcion.TERMINADO;
@@ -75,6 +78,7 @@ public class Interrupciones {
         return ResultadoInterrupcion.RUNNING;
     }
 
+    // INT 09H: solicita lectura de teclado y bloquea el proceso.
     private ResultadoInterrupcion ejecutarLecturaTeclado(BCP bcp) {
         if (solicitudTeclado != null) {
             solicitudTeclado.accept(bcp);
@@ -180,10 +184,12 @@ public class Interrupciones {
 
     /* ==================== HELPERS DE ARCHIVOS ==================== */
 
+    // Indica si el archivo existe en el índice PROCESO del disco.
     private boolean existeArchivoProceso(String nombre) {
         return disco.existe(nombre, Disco.TIPO_PROCESO);
     }
 
+    // Crea un archivo vacío en el disco y lo registra en el índice PROCESO.
     private boolean crearArchivoEnDisco(String nombre) {
         if (existeArchivoProceso(nombre)) return false;
 
@@ -195,6 +201,7 @@ public class Interrupciones {
         return disco.registrarArchivoProceso(nombre, inicio, inicio, Disco.ZONA_PRINCIPAL);
     }
 
+    // Lee el contenido completo del archivo desde el disco.
     private String leerArchivoDeDisco(String nombre) {
         if (!existeArchivoProceso(nombre)) return null;
 
@@ -210,6 +217,7 @@ public class Interrupciones {
         return sb.toString();
     }
 
+    // Escribe el contenido en el archivo del disco, reubicándolo si crece.
     private boolean escribirArchivoEnDisco(String nombre, String contenido) {
         if (!existeArchivoProceso(nombre)) return false;
         if (contenido == null) return false;
@@ -243,6 +251,7 @@ public class Interrupciones {
                 Disco.ZONA_PRINCIPAL);
     }
 
+    // Elimina el archivo del disco y de su índice.
     private boolean eliminarArchivoDeDisco(String nombre) {
         if (!existeArchivoProceso(nombre)) return false;
 
@@ -260,20 +269,24 @@ public class Interrupciones {
 
     /* ==================== CONFIGURACION DE CALLBACKS ==================== */
 
+    // Configura el callback de salida a pantalla.
     public void setSalidaPantalla(Consumer<String> callback) {
         this.salidaPantalla = callback;
     }
 
+    // Configura el callback de solicitud de teclado.
     public void setSolicitudTeclado(Consumer<BCP> callback) {
         this.solicitudTeclado = callback;
     }
 
+    // Configura el callback de solicitud de archivo.
     public void setSolicitudArchivo(Consumer<BCP> callback) {
         this.solicitudArchivo = callback;
     }
 
     /* ==================== RESULTADO ==================== */
 
+    // Resultado posible tras ejecutar una interrupción.
     public enum ResultadoInterrupcion {
         RUNNING,
         BLOQUEADO,

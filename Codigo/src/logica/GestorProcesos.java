@@ -58,6 +58,7 @@ public class GestorProcesos {
 
     private java.util.function.Consumer<String> salidaPantalla;
 
+    // Crea el gestor y sus colaboradores (planificador, despachador, etc.).
     public GestorProcesos(Memoria memoria,
                           CPU cpu,
                           ListaProcesos listaProcesos,
@@ -80,6 +81,7 @@ public class GestorProcesos {
 
     /* ==================== CREACIÓN DE PROCESOS ==================== */
 
+    // Carga un .asm como proceso nuevo: intenta RAM, luego swap.
     public ResultadoCarga cargarPrograma(File archivo) {
         Ensamblador ensamblador = new Ensamblador();
 
@@ -222,6 +224,7 @@ public class GestorProcesos {
         return ResultadoCarga.enEspera();
     }
 
+    // Reserva un BCP en el kernel, crea el BCP y lo admite en la partición.
     private BCP crearProcesoEnParticion(List<Instruccion> instrucciones, int base, int id) {
         int direccionBase = memoria.reservarBloqueBCP();
         if (direccionBase == -1) {
@@ -234,6 +237,7 @@ public class GestorProcesos {
 
     /* ==================== EJECUCIÓN PASO A PASO ==================== */
 
+    // Ejecuta un paso del ciclo: despacha, ejecuta 1 instrucción y gestiona estados.
     public boolean ejecutarUnPaso() {
         // 1. Si hay procesos esperando input, CPU idle.
         if (!procesosBloqueadosInput.isEmpty()) {
@@ -318,6 +322,7 @@ public class GestorProcesos {
         return true;
     }
 
+    // Devuelve la tardanza (en segundos) según la operación INT 21H en AH.
     private int calcularTardanzaDisco(BCP bcp) {
         int ah = bcp.getAh();
         switch (ah) {
@@ -330,6 +335,7 @@ public class GestorProcesos {
         }
     }
 
+    // Devuelve la instrucción actual del BCP como texto legible.
     private String leerInstruccionActual(BCP bcp) {
         int ir = bcp.getIr();
         if (ir < 0) return "(sin IR)";
@@ -338,6 +344,7 @@ public class GestorProcesos {
         return "[" + ir + "] " + instr.toString();
     }
 
+    // Indica si el proceso se bloqueó por una INT 21H (I/O de disco).
     private boolean fueBloqueoIO(BCP bcp) {
         int ir = bcp.getIr();
         if (ir < 0) return false;
@@ -347,6 +354,7 @@ public class GestorProcesos {
         return instr.getCodigoInterrupcion(0) == 0x21;
     }
 
+    // Ejecuta el ciclo completo de forma automática (con sleep entre pasos).
     public int ejecutarAutomatico(Runnable onPaso) {
         int pasos = 0;
         int maxPasos = 10000; // <- Evita ciclo infinito
@@ -404,6 +412,7 @@ public class GestorProcesos {
 
     /* ==================== TERMINACIÓN ==================== */
 
+    // Marca el proceso como terminado, guarda snapshot y libera sus recursos.
     public void procesoTerminado(BCP bcp) {
         bcp.setEstado(EstadoProceso.EXIT);
         bcp.marcarFin();
@@ -493,6 +502,7 @@ public class GestorProcesos {
                 + ", usuario=" + base + ")");
     }
 
+    // Escribe las instrucciones en la partición y agrega el BCP a ListaProcesos.
     private void admitirEnParticion(BCP bcp, List<Instruccion> instrucciones, int base) {
         bcp.setBase(base);
         bcp.setAlcance(instrucciones.size());
@@ -507,6 +517,7 @@ public class GestorProcesos {
         listaProcesos.agregar(bcp);
     }
 
+    // Desbloquea el primer proceso que esperaba input, con el valor leído.
     public boolean desbloquearProceso(int valor) {
         if (procesosBloqueadosInput.isEmpty()) return false;
 
@@ -518,22 +529,26 @@ public class GestorProcesos {
         return true;
     }
 
+    // Indica si hay procesos esperando input de teclado.
     public boolean hayProcesosBloqueados() {
         return !procesosBloqueadosInput.isEmpty();
     }
 
     /* ================== CONSULTAS PARA LA GUI ================== */
 
+    // Devuelve la cantidad de procesos activos (RAM + bloqueados + en CPU).
     public int getTotalProcesosActivos() {
         return listaProcesos.getCantidad()
              + procesosBloqueadosInput.size()
              + (despachador.getEjecutorActual() != null ? 1 : 0);
     }
 
+    // Devuelve el total de procesos (activos + en espera en disco).
     public int getTotalProcesos() {
         return getTotalProcesosActivos() + listaDeTrabajos.getCantidad();
     }
 
+    // Indica si queda algún proceso por ejecutar (en cualquier estado activo).
     public boolean hayProcesosActivos() {
         if (despachador.getEjecutorActual() != null) {
             BCP b = despachador.getBcpActual();
@@ -549,6 +564,7 @@ public class GestorProcesos {
             || !procesosBloqueadosInput.isEmpty();
     }
 
+    // Devuelve el BCP del proceso que está actualmente en CPU o en cola.
     public BCP getProcesoActual() {
         BCP actual = despachador.getBcpActual();
         if (actual != null) return actual;
@@ -565,20 +581,24 @@ public class GestorProcesos {
     public ListaProcesos getListaProcesos() { return listaProcesos; }
     public ListaDeTrabajos getListaDeTrabajos() { return listaDeTrabajos; }
 
+    // Devuelve cuántos procesos están esperando en disco (ListaDeTrabajos).
     public int getCantidadEnEspera() {
         return listaDeTrabajos.getCantidad();
     }
 
     public List<BCPTerminado> getProcesosTerminados() { return procesosTerminados; }
 
+    // Devuelve copia de la lista de procesos bloqueados por input.
     public List<BCP> getProcesosBloqueados() {
         return new ArrayList<>(procesosBloqueadosInput);
     }
 
+    // Devuelve copia de la lista de procesos bloqueados por input.
     public List<BCP> getProcesosBloqueadosInput() {
         return new ArrayList<>(procesosBloqueadosInput);
     }
 
+    // Devuelve la lista de trabajos en espera como arreglos.
     public List<Object[]> getProcesosEnEspera() {
         return listaDeTrabajos.toList();
     }
@@ -588,15 +608,18 @@ public class GestorProcesos {
 
     /* ================== CALLBACKS DE INTERRUPCIONES ================== */
 
+    // Configura el callback de salida a pantalla (propaga al despachador).
     public void setSalidaPantalla(java.util.function.Consumer<String> callback) {
         this.salidaPantalla = callback;
         despachador.setSalidaPantalla(callback);
     }
 
+    // Configura el callback de solicitud de teclado (propaga al despachador).
     public void setSolicitudTeclado(java.util.function.Consumer<BCP> callback) {
         despachador.setSolicitudTeclado(callback);
     }
 
+    // Configura el callback de solicitud de archivo (propaga al despachador).
     public void setSolicitudArchivo(java.util.function.Consumer<BCP> callback) {
         despachador.setSolicitudArchivo(callback);
     }

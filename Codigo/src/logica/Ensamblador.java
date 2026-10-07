@@ -62,6 +62,7 @@ public class Ensamblador {
 
     /* ==================== VALIDACION DE ARCHIVO ==================== */
 
+    // Valida que el archivo exista, sea .asm, tenga instrucciones y contenga INT 20H.
     public boolean esArchivoValido(File archivo) {
         erroresEncontrados = new ArrayList<>();
 
@@ -120,6 +121,7 @@ public class Ensamblador {
         return erroresEncontrados.isEmpty();
     }
 
+    // Devuelve todos los errores encontrados como un solo texto.
     public String getErroresComoTexto() {
         if (erroresEncontrados == null || erroresEncontrados.isEmpty()) {
             return "";
@@ -127,12 +129,14 @@ public class Ensamblador {
         return String.join("\n\n", erroresEncontrados);
     }
 
+    // Devuelve la lista de errores encontrados.
     public List<String> getErroresEncontrados() {
         return erroresEncontrados;
     }
 
     /* ==================== LECTURA DE ARCHIVO ==================== */
 
+    // Lee el archivo .asm y devuelve la lista de instrucciones.
     public List<Instruccion> leerArchivo(File archivoEnsamblador) {
         List<Instruccion> instrucciones = new ArrayList<>();
 
@@ -155,6 +159,7 @@ public class Ensamblador {
 
     /* ==================== PARSEO CENTRAL ==================== */
 
+    // Convierte una línea en una Instruccion, validando opcode y argumentos.
     private Instruccion parsearLinea(String linea) {
         int primerEspacio = linea.indexOf(' ');
         String opcode = (primerEspacio == -1) ? linea : linea.substring(0, primerEspacio);
@@ -182,6 +187,7 @@ public class Ensamblador {
         return new Instruccion(opcode, argumentos);
     }
 
+    // Separa los argumentos por coma, respetando comillas dobles.
     private List<String> parsearArgumentos(String resto) {
         List<String> argumentos = new ArrayList<>();
         if (resto == null || resto.isEmpty()) {
@@ -212,6 +218,7 @@ public class Ensamblador {
         return argumentos;
     }
 
+    // Valida la forma de los argumentos según el opcode.
     private void validarArgumentos(String opcode, List<String> argumentos) {
 
         if (OPCODES_SALTO.contains(opcode)) {
@@ -259,12 +266,14 @@ public class Ensamblador {
         }
     }
 
+    // Indica si el argumento es un string entre comillas dobles.
     private boolean esStringLiteral(String arg) {
         if (arg == null) return false;
         String s = arg.trim();
         return s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"");
     }
 
+    // Valida que el argumento sea un registro conocido.
     private void validarRegistro(String arg) {
         if (!REGISTROS_VALIDOS.contains(arg.toUpperCase())) {
             throw new IllegalArgumentException(
@@ -272,6 +281,7 @@ public class Ensamblador {
         }
     }
 
+    // Valida que el argumento sea un número entero (decimal o hexadecimal).
     private void validarEntero(String arg, String descripcion) {
         try {
             parsearNumero(arg);
@@ -283,6 +293,7 @@ public class Ensamblador {
 
     /* ==================== HELPERS DE NUMEROS ==================== */
 
+    // Parsea un número en decimal o hexadecimal (sufijo h/H).
     public static int parsearNumero(String arg) {
         if (arg == null || arg.isEmpty()) {
             throw new NumberFormatException("numero vacio");

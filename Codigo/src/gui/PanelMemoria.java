@@ -58,10 +58,12 @@ public class PanelMemoria extends JPanel {
     private static final Color COLOR_LIBRE          = new Color(0xF0, 0xF0, 0xF0);  // gris muy claro
     private static final Color COLOR_IR             = Paleta.AMARILLO_ADVERTENCIA;
 
+    // Crea el panel y construye su interfaz gráfica.
     public PanelMemoria() {
         construirInterfaz();
     }
 
+    // Construye la interfaz del panel (barra de uso + tabla + leyenda).
     private void construirInterfaz() {
         setLayout(new BorderLayout(5, 5));
         setBackground(Paleta.FONDO_PANEL);
@@ -191,6 +193,7 @@ public class PanelMemoria extends JPanel {
         return leyenda;
     }
 
+    // Crea un ítem de leyenda (cuadro de color + texto).
     private JPanel crearItemLeyenda(String texto, Color color) {
         JPanel item = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 0));
         item.setOpaque(false);
@@ -210,6 +213,7 @@ public class PanelMemoria extends JPanel {
         return item;
     }
 
+    // Devuelve el color de fondo correspondiente a la zona.
     private Color colorDeZona(String zona) {
         if (zona == null) return COLOR_USUARIO;
         switch (zona) {
@@ -222,6 +226,7 @@ public class PanelMemoria extends JPanel {
         }
     }
 
+    // Actualiza el panel con la memoria y el IR indicados.
     public void actualizar(Memoria memoria, int ir) {
         this.memoriaActual = memoria;
         this.irActual = ir;
@@ -229,6 +234,7 @@ public class PanelMemoria extends JPanel {
         actualizarBarra();
     }
 
+    // Refresca la tabla de la memoria (respetando el filtro activo).
     private void refrescar() {
         if (memoriaActual == null) {
             modelo.setRowCount(0);
@@ -259,6 +265,7 @@ public class PanelMemoria extends JPanel {
         }
     }
 
+    // Determina a qué zona pertenece una posición de memoria.
     private String calcularZona(int pos) {
         if (memoriaActual == null) return "";
 
@@ -284,6 +291,7 @@ public class PanelMemoria extends JPanel {
         return "?";
     }
 
+    // Actualiza la barra de uso de memoria.
     private void actualizarBarra() {
         if (memoriaActual == null) {
             barraUso.setValue(0);
@@ -428,6 +436,7 @@ public class PanelMemoria extends JPanel {
         return null;
     }
 
+    // Devuelve el nombre legible del campo de un BCP según su offset.
     private String nombreCampoBCP(int offset) {
         switch (offset) {
             case 0:  return "ID";
@@ -464,6 +473,7 @@ public class PanelMemoria extends JPanel {
         }
     }
 
+    // Devuelve el valor de un campo de un BCP como texto.
     private String valorCampoBCP(BCP bcp, int offset) {
         Object v = bcp.getMemoria().leer(bcp.getDireccionBase() + offset);
         if (v == null) return "(vacio)";

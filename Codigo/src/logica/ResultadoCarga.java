@@ -19,20 +19,24 @@ public class ResultadoCarga {
     private final BCP bcp;           // solo si EXITO
     private final String mensajeError; // solo si ERROR
 
+    // Constructor privado: usar los factories exito/error/enEspera.
     private ResultadoCarga(Estado estado, BCP bcp, String mensajeError) {
         this.estado = estado;
         this.bcp = bcp;
         this.mensajeError = mensajeError;
     }
 
+    // Crea un resultado exitoso con el BCP creado.
     public static ResultadoCarga exito(BCP bcp) {
         return new ResultadoCarga(Estado.EXITO, bcp, null);
     }
 
+    // Crea un resultado de error con el mensaje indicado.
     public static ResultadoCarga error(String mensaje) {
         return new ResultadoCarga(Estado.ERROR, null, mensaje);
     }
 
+    // Crea un resultado en espera (archivo válido, sin partición libre).
     public static ResultadoCarga enEspera() {
         return new ResultadoCarga(Estado.EN_ESPERA, null, null);
     }
